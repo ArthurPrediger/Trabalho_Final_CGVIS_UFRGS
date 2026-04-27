@@ -6,16 +6,16 @@
 
 ## Integrantes da dupla
 
-- **Aluno 1 - Nome**: <mark>`<preencher>`</mark>
-- **Aluno 1 - Cartão UFRGS**: <mark>`<preencher>`</mark>
+- **Aluno 1 - Nome**: Arthur Rambo Prediger
+- **Aluno 1 - Cartão UFRGS**: 00334521
 
-- **Aluno 2 - Nome**: <mark>`<preencher>`</mark>
-- **Aluno 2 - Cartão UFRGS**: <mark>`<preencher>`</mark>
+- **Aluno 2 - Nome**: Taylor Souza Frutuoso da Costa
+- **Aluno 2 - Cartão UFRGS**: 00213957
 
 ## Detalhes do que será implementado
 
-- **Título do trabalho**: <mark>`<preencher>`</mark>
-- **Parágrafo curto descrevendo o que será implementado**: <mark>`<preencher>`</mark>
+- **Título do trabalho**: Autorama Arcade
+- **Parágrafo curto descrevendo o que será implementado**: será implementado um jogo que simula o funcionamento de um autorama (automodelismo de fenda) inspirado nas funcionalidades arcade do estágio Slot-Car Derby do jogo Mario Party Superstars. 
 
 ## Especificação visual
 
@@ -34,7 +34,9 @@
 >   do próprio repositório. Mas, garanta que qualquer um tenha
 >   permissão de acesso ao vídeo através deste link.
 
-<mark>`<preencher>`</mark>
+Link 1: https://www.youtube.com/watch?v=iQR6Ru8bRtg
+
+Link 2: https://www.youtube.com/watch?v=GAPWfClVFJI
 
 ### Vídeo - Timestamp
 
@@ -43,8 +45,10 @@
 >   será a base de comparação para avaliar se o seu trabalho final
 >   conseguiu ou não reproduzir a referência.
 
-- **Timestamp inicial**: <mark>`<preencher>`</mark>
-- **Timestamp final**: <mark>`<preencher>`</mark>
+- **Timestamp inicial 1**: 00:00
+- **Timestamp final 1**: 00:30
+- **Timestamp inicial 2**: 01:55
+- **Timestamp final 2**: 02:25
 
 ### Imagens
 
@@ -52,7 +56,12 @@
 > - Coloque aqui **três imagens** capturadas do vídeo acima, que você
 >   irá usar como ilustração para as explicações que vêm abaixo.
 
-<mark>`<preencher>`</mark>
+<img width="1600" height="900" alt="image" src="https://github.com/user-attachments/assets/00f439b1-f3ee-401f-b02f-c8af2b503415" />
+
+<img width="1567" height="655" alt="image" src="https://github.com/user-attachments/assets/34e0b688-05dd-4510-8fe6-2cdf4083f72a" />
+
+<img width="1594" height="745" alt="image" src="https://github.com/user-attachments/assets/d8da57d9-d707-4ff9-aa49-431e7d5c7dba" />
+
 
 ## Especificação textual
 
