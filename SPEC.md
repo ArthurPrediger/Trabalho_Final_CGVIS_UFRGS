@@ -108,5 +108,5 @@ A rotação das rodas dos carros serão baseadas no tempo. Haverão placas de si
 - Pista com bifurcações como em Mario Party: para o conceito proposto, consideramos melhor manter todos os carros percorrendo o mesmo trajeto. Os carros que partem nas faixas mais externas terão a distância que percorrem a mais compensada com um delocamento inicial ao invés de partirem lado a lado com a bifurcação compensando a diferença.
 - Caso haja tempo hábil, as técnicas visuais citadas acima podem ser consideradas para implementação.
 
-## Mecânica diferente do exemplo de Slor-Car Derby do Mario Party
+## Mecânica diferente do exemplo de Slot-Car Derby do Mario Party
 Como citado acima, haverá uma mecânica que permite a troca de faixa pelos jogadores e que adiciona a necessidade de testes de intersecção. Essa mecânica visa adicionar mais estratégia para o formato da corrida, pois os jogadores que estiverem andando atrás de outros carros podem acumular uma certa quantidade de propulsão extra que por tempo limitado os permite andar mais rápido e sem sofrer penalidades por ultrapassar a velocidade máxima das curvas. Por outro lado, os jogadores que estiverem atrás podem ser penalizados por bater na traseira dos advesários se ainda não estiverem com a propulsão ativa.
