@@ -34,9 +34,9 @@
 >   do próprio repositório. Mas, garanta que qualquer um tenha
 >   permissão de acesso ao vídeo através deste link.
 
-Link 1: https://www.youtube.com/watch?v=iQR6Ru8bRtg
+Link 1, mecânicas e interações pretendidas: https://www.youtube.com/watch?v=iQR6Ru8bRtg
 
-Link 2: https://www.youtube.com/watch?v=GAPWfClVFJI
+Link 2, visual pretendido: https://www.youtube.com/watch?v=GAPWfClVFJI
 
 ### Vídeo - Timestamp
 
@@ -83,7 +83,7 @@ Múltiplas instâncias de árvores, placas ou outros objetos decorativos serão 
 Devido a inclusão da mecânica exclusiva de troca de faixa dinâmica que o usuário escolhe para o carro percorrer, serão testadas intersecções entre os carros que estão utilizando as mesmas faixas. Hitboxes simplificadas serão utilizadas para cada carro e a intenção é que o carro que colide na traseira de outro sofra um atraso maior na retomada de velocidade.  
 
 ### Modelos de Iluminação em todos os objetos
-<mark>`<preencher>`</mark>
+A respeito da iluminação, será considerada uma fonte de luz direcional que representará o Sol e mais um fator de luz ambiente que se assemelhe com a terceira imagem adicionada acima. Será utilizado um shader parametrizável que possibilite a representação de materias dos seguintes tipos: metais, pinturas automotivas, borrachas, plásticos, madeiras e folhas. 
 
 ### Mapeamento de texturas em todos os objetos
 Serão utilizados modelos com mapeamento UV e texturas de albedo e normais já pré-computados para os carros, pista e objetos nas laterais do cenário. Caso os modelos adquiridos de forma online possuam outras texturas (especular, rugosidade, oclusão de ambiente) essas também serão utilizadas. 
@@ -103,4 +103,10 @@ A rotação das rodas dos carros serão baseadas no tempo. Haverão placas de si
 > - Para cada item, **explique por que** não será implementado ou por
 >   que será implementado parcialmente.
 
-<mark>`<preencher>`</mark>
+- Sombras dos carros: mapas de sombra em tempo real ou outras técnicas avançadas de sombreamento não serão implementadas por terem uma implementação mais complexa.
+- Reflexos nos vidros dos carros: reflexos com mapas de cubo ou outras técnicas mais avançadas de reflexo também não serão implementadas por terem uma implementação mais complexa, a ideia é ao menos tentar refletir o skybox.
+- Pista com bifurcações como em Mario Party: para o conceito proposto, consideramos melhor manter todos os carros percorrendo o mesmo trajeto. Os carros que partem nas faixas mais externas terão a distância que percorrem a mais compensada com um delocamento inicial ao invés de partirem lado a lado com a bifurcação compensando a diferença.
+- Caso haja tempo hábil, as técnicas visuais citadas acima podem ser consideradas para implementação.
+
+## Mecânica diferente do exemplo de Slor-Car Derby do Mario Party
+Como citado acima, haverá uma mecânica que permite a troca de faixa pelos jogadores e que adiciona a necessidade de testes de intersecção. Essa mecânica visa adicionar mais estratégia para o formato da corrida, pois os jogadores que estiverem andando atrás de outros carros podem acumular uma certa quantidade de propulsão extra que por tempo limitado os permite andar mais rápido e sem sofrer penalidades por ultrapassar a velocidade máxima das curvas. Por outro lado, os jogadores que estiverem atrás podem ser penalizados por bater na traseira dos advesários se ainda não estiverem com a propulsão ativa.
