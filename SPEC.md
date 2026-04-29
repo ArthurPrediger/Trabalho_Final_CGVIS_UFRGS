@@ -71,22 +71,22 @@ Para cada um dos requisitos abaixo (detalhados no [Enunciado do Trabalho final -
 A aplicação conterá malhas de carros que serão complexas, semelhantes aos das imagens 2 e 3, com os modelos exatos a depender do que for encontrado em repositórios online. A geometria da pista e eventuais objetos decorando as laterais dela também terão complexidade adequada para que apresentem curvas suaves, dando ênfase principal aos carros e pista.
 
 ### Transformações geométricas controladas pelo usuário
-O usuário poderá controlar a posição do seu carro acelerando e freiando de forma que ele percorra o trajeto da pista de forma semelhante ao vídeo do primeiro link. A rotação também será controlada pelo usuário de forma indireta conforme o carro precise se manter alinhado com o trajeto pré-determinado. 
+O usuário poderá controlar a posição do seu carro acelerando e freiando de forma que ele percorra o trajeto da pista de forma semelhante ao vídeo do primeiro link. A rotação também será controlada pelo usuário de forma indireta conforme o carro precise se manter alinhado com o trajeto pré-determinado. Na versão do autorama em Mario Party, cada carro se mantém em sua faixa, uma nova mecânica de troca de faixas que desloca o carro lateralmente também visa ser implementada.
 
 ### Diferentes tipos de câmeras
-<mark>`<preencher>`</mark>
+O estilo de câmera padrão utilizado ao longo da corrida será semelhante ao do primeiro vídeo, com a câmera regulando seu afastamento e posição em relação a pista para manter todos os jogadores visíveis em tela. Como no vídeo, esse estilo de câmera se mantém mais próximo da pista se os jogadores estiverem andando próximos/aglomerados. Um segundo estilo de câmera será adicionado numa espécie de replay, que permitirá o jogador ver a última corrida a partir de uma câmera que segue qualquer um dos carros e pode ser rotacionada ao redor dele. 
 
 ### Instâncias de objetos
-<mark>`<preencher>`</mark>
+Múltiplas instâncias de árvores, placas ou outros objetos decorativos serão adicionados nas laterais da pista, semelhantemente ao segundo vídeo. Modelos exatos de objetos dependerão do que for encontrado online.  
 
 ### Testes de intersecção
-O jogo terá uma mecânica de colisão entre os carros na pista que permitirá o jogador prejudicar o desempenho dos adversários ao colidir em dertermindas circunstâncias.
+Devido a inclusão da mecânica exclusiva de troca de faixa dinâmica que o usuário escolhe para o carro percorrer, serão testadas intersecções entre os carros que estão utilizando as mesmas faixas. Hitboxes simplificadas serão utilizadas para cada carro e a intenção é que o carro que colide na traseira de outro sofra um atraso maior na retomada de velocidade.  
 
 ### Modelos de Iluminação em todos os objetos
 <mark>`<preencher>`</mark>
 
 ### Mapeamento de texturas em todos os objetos
-Serão utilizados modelos com mapeamento UV e texturas de albedo e normais já pré-computados para os carros, pista e objetos nas laterais do cenário. Caso os modelos adquiridos de forma online possuam outras texturas (especular, rugosidade, oclusão de ambiente) estas também serão utilizadas. 
+Serão utilizados modelos com mapeamento UV e texturas de albedo e normais já pré-computados para os carros, pista e objetos nas laterais do cenário. Caso os modelos adquiridos de forma online possuam outras texturas (especular, rugosidade, oclusão de ambiente) essas também serão utilizadas. 
 
 ### Movimentação com curva Bézier cúbica
 A movimentação dos carros sobre a pista será baseada em curvas de bézier cúbicas combinadas para formar o trajeto total da pista.
