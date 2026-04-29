@@ -68,10 +68,10 @@ Link 2: https://www.youtube.com/watch?v=GAPWfClVFJI
 Para cada um dos requisitos abaixo (detalhados no [Enunciado do Trabalho final - Moodle](https://moodle.ufrgs.br/mod/assign/view.php?id=6018620)), escreva um parágrafo **curto** explicando como este requisito será atendido, apontando itens específicos do vídeo/imagens que você incluiu acima que atendem estes requisitos.
 
 ### Malhas poligonais complexas
-<mark>`<preencher>`</mark>
+A aplicação conterá malhas de carros que serão complexas, semelhantes aos das imagens 2 e 3, com os modelos exatos a depender do que for encontrado em repositórios online. A geometria da pista e eventuais objetos decorando as laterais dela também terão complexidade adequada para que apresentem curvas suaves, dando ênfase principal aos carros e pista.
 
 ### Transformações geométricas controladas pelo usuário
-<mark>`<preencher>`</mark>
+O usuário poderá controlar a posição do seu carro acelerando e freiando de forma que ele percorra o trajeto da pista de forma semelhante ao vídeo do primeiro link. A rotação também será controlada pelo usuário de forma indireta conforme o carro precise se manter alinhado com o trajeto pré-determinado. 
 
 ### Diferentes tipos de câmeras
 <mark>`<preencher>`</mark>
