@@ -80,19 +80,19 @@ O usuário poderá controlar a posição do seu carro acelerando e freiando de f
 <mark>`<preencher>`</mark>
 
 ### Testes de intersecção
-<mark>`<preencher>`</mark>
+O jogo terá uma mecânica de colisão entre os carros na pista que permitirá o jogador prejudicar o desempenho dos adversários ao colidir em dertermindas circunstâncias.
 
 ### Modelos de Iluminação em todos os objetos
 <mark>`<preencher>`</mark>
 
 ### Mapeamento de texturas em todos os objetos
-<mark>`<preencher>`</mark>
+Serão utilizados modelos com mapeamento UV e texturas de albedo e normais já pré-computados para os carros, pista e objetos nas laterais do cenário. Caso os modelos adquiridos de forma online possuam outras texturas (especular, rugosidade, oclusão de ambiente) estas também serão utilizadas. 
 
 ### Movimentação com curva Bézier cúbica
-<mark>`<preencher>`</mark>
+A movimentação dos carros sobre a pista será baseada em curvas de bézier cúbicas combinadas para formar o trajeto total da pista.
 
 ### Animações baseadas no tempo ($\Delta t$)
-<mark>`<preencher>`</mark>
+A rotação das rodas dos carros serão baseadas no tempo. Haverão placas de sinalização na pista, semelhantes às do primeiro vídeo, que também serão animadas baseadas em tempo. Será implementado um efeito visual com partículas pra sinalizar a largada dos carros. 
 
 ## Limitações esperadas
 
