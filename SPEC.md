@@ -110,3 +110,5 @@ A rotação das rodas dos carros serão baseadas no tempo. Haverão placas de si
 
 ## Mecânica diferente do exemplo de Slot-Car Derby do Mario Party
 Como citado acima, haverá uma mecânica que permite a troca de faixa pelos jogadores e que adiciona a necessidade de testes de intersecção. Essa mecânica visa adicionar mais estratégia para o formato da corrida, pois os jogadores que estiverem andando atrás de outros carros podem acumular uma certa quantidade de propulsão extra que por tempo limitado os permite andar mais rápido e sem sofrer penalidades por ultrapassar a velocidade máxima das curvas. Por outro lado, os jogadores que estiverem atrás podem ser penalizados por bater na traseira dos advesários se ainda não estiverem com a propulsão ativa.
+
+> Comentário Professor: OK
