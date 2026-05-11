@@ -315,6 +315,10 @@ int main(int argc, char* argv[])
     ComputeNormals(&planemodel);
     BuildTrianglesAndAddToVirtualScene(&planemodel);
 
+    ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
+    ComputeNormals(&car_zr1_model);
+    BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
+
     if ( argc > 1 )
     {
         ObjModel model(argv[1]);
@@ -413,22 +417,32 @@ int main(int argc, char* argv[])
         #define SPHERE 0
         #define BUNNY  1
         #define PLANE  2
+        #define CAR_ZR1 3
 
         // Desenhamos o modelo da esfera
-        model = Matrix_Translate(-1.0f,0.0f,0.0f)
-              * Matrix_Rotate_Z(0.6f)
-              * Matrix_Rotate_X(0.2f)
-              * Matrix_Rotate_Y(g_AngleY + (float)glfwGetTime() * 0.1f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, SPHERE);
-        DrawVirtualObject("the_sphere");
+        //model = Matrix_Translate(-1.0f,0.0f,0.0f)
+        //      * Matrix_Rotate_Z(0.6f)
+        //      * Matrix_Rotate_X(0.2f)
+        //      * Matrix_Rotate_Y(g_AngleY + (float)glfwGetTime() * 0.1f);
+        //glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        //glUniform1i(g_object_id_uniform, SPHERE);
+        //DrawVirtualObject("the_sphere");
 
         // Desenhamos o modelo do coelho
-        model = Matrix_Translate(1.0f,0.0f,0.0f)
-              * Matrix_Rotate_X(g_AngleX + (float)glfwGetTime() * 0.1f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, BUNNY);
-        DrawVirtualObject("the_bunny");
+        //model = Matrix_Translate(1.0f, 0.0f, 0.0f)
+        //      * Matrix_Rotate_X(g_AngleX + (float)glfwGetTime() * 0.1f);
+        //glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        //glUniform1i(g_object_id_uniform, BUNNY);
+        //DrawVirtualObject("the_bunny");
+
+        // Desenhamos o modelo do carro ZR1
+        for(const auto& shape : car_zr1_model.shapes)
+        {
+            model = Matrix_Translate(0.0f, -1.0f, 0.0f) * Matrix_Scale(0.5, 0.5, 0.5);
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform1i(g_object_id_uniform, CAR_ZR1);
+            DrawVirtualObject(shape.name.c_str());
+        }
 
         // Desenhamos o plano do chão
         model = Matrix_Translate(0.0f,-1.1f,0.0f);
