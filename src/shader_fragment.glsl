@@ -29,10 +29,12 @@ uniform vec4 bbox_min;
 uniform vec4 bbox_max;
 
 // Variáveis para acesso das imagens de textura
-//uniform bool has_texture;
+uniform bool has_texture;
 uniform sampler2D texture_sampler;
 //uniform sampler2D TextureImage1;
 //uniform sampler2D TextureImage2;
+
+uniform vec3 kd;
 
 // O valor de saída ("out") de um Fragment Shader é a cor final do fragmento.
 out vec4 color;
@@ -133,7 +135,7 @@ void main()
         V = texcoords.y;
 
 		// Obtemos a refletância difusa a partir da leitura da imagem TextureImage1
-		Kd0 = texture(texture_sampler, vec2(U,V)).rgb;
+		has_texture ? Kd0 = texture(texture_sampler, vec2(U,V)).rgb : Kd0 = kd;
     }
 
     // Equação de Iluminação

@@ -30,6 +30,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <unordered_map>
 
 // Headers das bibliotecas OpenGL
 #include <glad/glad.h>   // Criação de contexto OpenGL 3.3
@@ -222,6 +223,9 @@ GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
 GLint g_texture_uniform;
+GLint g_has_texture_uniform;
+GLint g_kd_uniform;
+
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -318,7 +322,6 @@ int main(int argc, char* argv[])
 
     ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
     ComputeNormals(&car_zr1_model);
-    BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
 
 	std::vector<GLuint> texture_ids(car_zr1_model.materials.size(), 0);
 	int32_t material_index = 0;
@@ -333,6 +336,87 @@ int main(int argc, char* argv[])
 
 		material_index++;
     }
+
+    std::vector<tinyobj::shape_t> new_shapes;
+
+    for (const auto& shape : car_zr1_model.shapes)
+    {
+        // Check whether all faces use the same material
+        bool multiple_materials = false;
+
+        if (!shape.mesh.material_ids.empty())
+        {
+            int first_mat = shape.mesh.material_ids[0];
+
+            for (size_t i = 1; i < shape.mesh.material_ids.size(); i++)
+            {
+                if (shape.mesh.material_ids[i] != first_mat)
+                {
+                    multiple_materials = true;
+                    break;
+                }
+            }
+        }
+
+        // If already single-material, keep as-is
+        if (!multiple_materials)
+        {
+            new_shapes.push_back(shape);
+            continue;
+        }
+
+        // Split by material
+        std::unordered_map<int, tinyobj::shape_t> split_shapes;
+
+        size_t index_offset = 0;
+
+        for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); face++)
+        {
+            int material_id = shape.mesh.material_ids[face];
+
+            // Create split shape if necessary
+            if (split_shapes.find(material_id) == split_shapes.end())
+            {
+                tinyobj::shape_t split_shape;
+
+                split_shape.name =
+                    shape.name + "_mat_" + std::to_string(material_id);
+
+                split_shapes[material_id] = split_shape;
+            }
+
+            auto& dst_shape = split_shapes[material_id];
+
+            uint8_t fv = shape.mesh.num_face_vertices[face];
+
+            // Copy face vertex count
+            dst_shape.mesh.num_face_vertices.push_back(fv);
+
+            // Copy material id
+            dst_shape.mesh.material_ids.push_back(material_id);
+
+            // Copy indices
+            for (size_t v = 0; v < fv; v++)
+            {
+                dst_shape.mesh.indices.push_back(
+                    shape.mesh.indices[index_offset + v]
+                );
+            }
+
+            index_offset += fv;
+        }
+
+        // Append split shapes
+        for (auto& kv : split_shapes)
+        {
+            new_shapes.push_back(std::move(kv.second));
+        }
+    }
+
+    // Replace original shapes vector
+    car_zr1_model.shapes = std::move(new_shapes);
+
+    BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
 
     if ( argc > 1 )
     {
@@ -461,9 +545,17 @@ int main(int argc, char* argv[])
             int material_idx = shape.mesh.material_ids[0];
             GLuint text_id = texture_ids[material_idx];
             if(text_id != 0)
+            {
+                glUniform1i(g_has_texture_uniform, true);
                 glBindTexture(GL_TEXTURE_2D, text_id);
+            }
             else
-                glBindTexture(GL_TEXTURE_2D, plane_text_id);
+            {
+                glUniform1i(g_has_texture_uniform, false);
+                const auto& mat = car_zr1_model.materials[material_idx];
+                glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
+            }
+
             glUniform1i(g_texture_uniform, 0);
             DrawVirtualObject(shape.name.c_str());
         }
@@ -473,6 +565,7 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, PLANE);
         glActiveTexture(GL_TEXTURE0);
+        glUniform1i(g_has_texture_uniform, true);
         glBindTexture(GL_TEXTURE_2D, plane_text_id);
         glUniform1i(g_texture_uniform, 0);
         DrawVirtualObject("the_plane");
@@ -542,8 +635,7 @@ GLuint LoadTextureImage(const char* filename)
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
-    GLuint textureunit = g_NumLoadedTextures;
-    glActiveTexture(GL_TEXTURE0 + textureunit);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -630,13 +722,15 @@ void LoadShadersFromFiles()
     // Buscamos o endereço das variáveis definidas dentro do Vertex Shader.
     // Utilizaremos estas variáveis para enviar dados para a placa de vídeo
     // (GPU)! Veja arquivo "shader_vertex.glsl" e "shader_fragment.glsl".
-    g_model_uniform      = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
-    g_view_uniform       = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
-    g_projection_uniform = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
-    g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
-    g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
-    g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
-    g_texture_uniform    = glGetUniformLocation(g_GpuProgramID, "texture_sampler");
+    g_model_uniform       = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
+    g_view_uniform        = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
+    g_projection_uniform  = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
+    g_object_id_uniform   = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
+    g_bbox_min_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_min");
+    g_bbox_max_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_texture_uniform     = glGetUniformLocation(g_GpuProgramID, "texture_sampler");
+	g_has_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_texture");
+	g_kd_uniform          = glGetUniformLocation(g_GpuProgramID, "kd");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
