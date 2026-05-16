@@ -117,7 +117,7 @@ void PopMatrix(glm::mat4& M);
 void BuildTrianglesAndAddToVirtualScene(ObjModel*); // Constrói representação de um ObjModel como malha de triângulos para renderização
 void ComputeNormals(ObjModel* model); // Computa normais de um ObjModel, caso não existam.
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-void LoadTextureImage(const char* filename); // Função que carrega imagens de textura
+GLuint LoadTextureImage(const char* filename); // Função que carrega imagens de textura
 void DrawVirtualObject(const char* object_name); // Desenha um objeto armazenado em g_VirtualScene
 GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
@@ -221,6 +221,7 @@ GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
+GLint g_texture_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -299,8 +300,8 @@ int main(int argc, char* argv[])
     LoadShadersFromFiles();
 
     // Carregamos duas imagens para serem utilizadas como textura
-    LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
-    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
+    //LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
+    GLuint plane_text_id = LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
     // Construímos a representação de objetos geométricos através de malhas de triângulos
     ObjModel spheremodel("../../data/sphere.obj");
@@ -318,6 +319,20 @@ int main(int argc, char* argv[])
     ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
     ComputeNormals(&car_zr1_model);
     BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
+
+	std::vector<GLuint> texture_ids(car_zr1_model.materials.size(), 0);
+	int32_t material_index = 0;
+    for (const auto& mat : car_zr1_model.materials)
+    {
+		if(!mat.diffuse_texname.empty())
+        {
+           std::string text_path = "../../data/zr1_model/" + mat.diffuse_texname;
+
+		   texture_ids[material_index] = LoadTextureImage(text_path.c_str());
+        }
+
+		material_index++;
+    }
 
     if ( argc > 1 )
     {
@@ -417,7 +432,7 @@ int main(int argc, char* argv[])
         #define SPHERE 0
         #define BUNNY  1
         #define PLANE  2
-        #define CAR_ZR1 3
+        #define CAR_ZR1 2
 
         // Desenhamos o modelo da esfera
         //model = Matrix_Translate(-1.0f,0.0f,0.0f)
@@ -441,6 +456,15 @@ int main(int argc, char* argv[])
             model = Matrix_Translate(0.0f, -1.0f, 0.0f) * Matrix_Scale(0.5, 0.5, 0.5);
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
             glUniform1i(g_object_id_uniform, CAR_ZR1);
+
+            glActiveTexture(GL_TEXTURE0);
+            int material_idx = shape.mesh.material_ids[0];
+            GLuint text_id = texture_ids[material_idx];
+            if(text_id != 0)
+                glBindTexture(GL_TEXTURE_2D, text_id);
+            else
+                glBindTexture(GL_TEXTURE_2D, plane_text_id);
+            glUniform1i(g_texture_uniform, 0);
             DrawVirtualObject(shape.name.c_str());
         }
 
@@ -448,7 +472,12 @@ int main(int argc, char* argv[])
         model = Matrix_Translate(0.0f,-1.1f,0.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, PLANE);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, plane_text_id);
+        glUniform1i(g_texture_uniform, 0);
         DrawVirtualObject("the_plane");
+
+        glBindTexture(GL_TEXTURE_2D, 0); // unbind
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -484,7 +513,7 @@ int main(int argc, char* argv[])
 }
 
 // Função que carrega uma imagem para ser utilizada como textura
-void LoadTextureImage(const char* filename)
+GLuint LoadTextureImage(const char* filename)
 {
     printf("Carregando imagem \"%s\"... ", filename);
 
@@ -505,17 +534,7 @@ void LoadTextureImage(const char* filename)
 
     // Agora criamos objetos na GPU com OpenGL para armazenar a textura
     GLuint texture_id;
-    GLuint sampler_id;
     glGenTextures(1, &texture_id);
-    glGenSamplers(1, &sampler_id);
-
-    // Veja slides 95-96 do documento Aula_20_Mapeamento_de_Texturas.pdf
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    // Parâmetros de amostragem da textura.
-    glSamplerParameteri(sampler_id, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glSamplerParameteri(sampler_id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Agora enviamos a imagem lida do disco para a GPU
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -528,11 +547,18 @@ void LoadTextureImage(const char* filename)
     glBindTexture(GL_TEXTURE_2D, texture_id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
-    glBindSampler(textureunit, sampler_id);
+
+    // Texture parameters directly on the texture object (simpler for most cases)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     stbi_image_free(data);
 
-    g_NumLoadedTextures += 1;
+    glBindTexture(GL_TEXTURE_2D, 0);   // unbind
+
+    return texture_id;
 }
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
@@ -610,6 +636,7 @@ void LoadShadersFromFiles()
     g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
     g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_texture_uniform    = glGetUniformLocation(g_GpuProgramID, "texture_sampler");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
