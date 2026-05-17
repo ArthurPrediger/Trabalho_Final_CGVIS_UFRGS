@@ -173,7 +173,7 @@ struct SceneObject
 // (map).  Veja dentro da função BuildTrianglesAndAddToVirtualScene() como que são incluídos
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
-std::map<std::string, SceneObject> g_VirtualScene;
+std::unordered_map<std::string, SceneObject> g_VirtualScene;
 
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4>  g_MatrixStack;
@@ -222,10 +222,17 @@ GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
-GLint g_texture_uniform;
-GLint g_has_texture_uniform;
+GLint g_texture_uniform_0;
+GLint g_texture_uniform_1;
+GLint g_texture_uniform_2;
+GLint g_has_kd_texture_uniform;
+GLint g_has_ke_texture_uniform;
+GLint g_has_opacity_texture_uniform;
 GLint g_kd_uniform;
-
+GLint g_ks_uniform;
+GLint g_ke_uniform;
+GLint g_ns_uniform;
+GLint g_opacity_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -308,22 +315,25 @@ int main(int argc, char* argv[])
     GLuint plane_text_id = LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
     // Construímos a representação de objetos geométricos através de malhas de triângulos
-    ObjModel spheremodel("../../data/sphere.obj");
-    ComputeNormals(&spheremodel);
-    BuildTrianglesAndAddToVirtualScene(&spheremodel);
+    //ObjModel spheremodel("../../data/sphere.obj");
+    //ComputeNormals(&spheremodel);
+    //BuildTrianglesAndAddToVirtualScene(&spheremodel);
 
-    ObjModel bunnymodel("../../data/bunny.obj");
-    ComputeNormals(&bunnymodel);
-    BuildTrianglesAndAddToVirtualScene(&bunnymodel);
+    //ObjModel bunnymodel("../../data/bunny.obj");
+    //ComputeNormals(&bunnymodel);
+    //BuildTrianglesAndAddToVirtualScene(&bunnymodel);
 
-    ObjModel planemodel("../../data/plane.obj");
-    ComputeNormals(&planemodel);
-    BuildTrianglesAndAddToVirtualScene(&planemodel);
+    ObjModel plane_model("../../data/plane.obj");
+    ComputeNormals(&plane_model);
+    BuildTrianglesAndAddToVirtualScene(&plane_model);
 
     ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
     ComputeNormals(&car_zr1_model);
 
-	std::vector<GLuint> texture_ids(car_zr1_model.materials.size(), 0);
+	constexpr GLuint max_gluint = std::numeric_limits<GLuint>::max();
+	std::vector<GLuint> kd_texture_ids(car_zr1_model.materials.size(), max_gluint);
+	std::vector<GLuint> ke_texture_ids(car_zr1_model.materials.size(), max_gluint);
+	std::vector<GLuint> opacity_texture_ids(car_zr1_model.materials.size(), max_gluint);
 	int32_t material_index = 0;
     for (const auto& mat : car_zr1_model.materials)
     {
@@ -331,7 +341,21 @@ int main(int argc, char* argv[])
         {
            std::string text_path = "../../data/zr1_model/" + mat.diffuse_texname;
 
-		   texture_ids[material_index] = LoadTextureImage(text_path.c_str());
+		   kd_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
+        }
+
+        if (!mat.emissive_texname.empty())
+        {
+            std::string text_path = "../../data/zr1_model/" + mat.emissive_texname;
+
+            ke_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
+        }
+
+        if (!mat.alpha_texname.empty())
+        {
+            std::string text_path = "../../data/zr1_model/" + mat.alpha_texname;
+
+            opacity_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
         }
 
 		material_index++;
@@ -456,6 +480,12 @@ int main(int argc, char* argv[])
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
+        glUniform1i(g_texture_uniform_0, 0);
+        glUniform1i(g_texture_uniform_1, 1);
+        glUniform1i(g_texture_uniform_2, 2);
+
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         // Computamos a posição da câmera utilizando coordenadas esféricas.  As
         // variáveis g_CameraDistance, g_CameraPhi, e g_CameraTheta são
         // controladas pelo mouse do usuário. Veja as funções CursorPosCallback()
@@ -534,8 +564,23 @@ int main(int argc, char* argv[])
         //glUniform1i(g_object_id_uniform, BUNNY);
         //DrawVirtualObject("the_bunny");
 
-        // Desenhamos o modelo do carro ZR1
-        for(const auto& shape : car_zr1_model.shapes)
+        // Desenhamos o plano do chão
+        model = Matrix_Translate(0.0f, -1.1f, 0.0f);
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform1i(g_object_id_uniform, PLANE);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(g_has_kd_texture_uniform, true);
+        glUniform1i(g_has_ke_texture_uniform, false);
+        glUniform1i(g_has_opacity_texture_uniform, false);
+        glUniform3f(g_kd_uniform, 1, 1, 1);
+        glUniform3f(g_ks_uniform, 0, 0, 0);
+        glUniform3f(g_ke_uniform, 0, 0, 0);
+        glUniform1f(g_ns_uniform, 0);
+        glUniform1f(g_opacity_uniform, 1);
+        glBindTexture(GL_TEXTURE_2D, plane_text_id);
+        DrawVirtualObject("the_plane");
+
+        auto draw_shape = [&](const tinyobj::shape_t& shape)
         {
             model = Matrix_Translate(0.0f, -1.0f, 0.0f) * Matrix_Scale(0.5, 0.5, 0.5);
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
@@ -543,33 +588,103 @@ int main(int argc, char* argv[])
 
             glActiveTexture(GL_TEXTURE0);
             int material_idx = shape.mesh.material_ids[0];
-            GLuint text_id = texture_ids[material_idx];
-            if(text_id != 0)
+            const auto& mat = car_zr1_model.materials[material_idx];
+            GLuint kd_text_id = kd_texture_ids[material_idx];
+            GLuint ke_text_id = ke_texture_ids[material_idx];
+            GLuint opacity_text_id = opacity_texture_ids[material_idx];
+            if (kd_text_id != max_gluint)
             {
-                glUniform1i(g_has_texture_uniform, true);
-                glBindTexture(GL_TEXTURE_2D, text_id);
+                glUniform1i(g_has_kd_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, kd_text_id);
             }
             else
             {
-                glUniform1i(g_has_texture_uniform, false);
-                const auto& mat = car_zr1_model.materials[material_idx];
-                glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
+                glUniform1i(g_has_kd_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (ke_text_id != max_gluint)
+            {
+                glUniform1i(g_has_ke_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, ke_text_id);
+            }
+            else
+            {
+                glUniform1i(g_has_ke_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (opacity_text_id != max_gluint)
+            {
+                glUniform1i(g_has_opacity_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, opacity_text_id);
+            }
+            else
+            {
+                glUniform1i(g_has_opacity_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, 0);
             }
 
-            glUniform1i(g_texture_uniform, 0);
+            glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
+            glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
+            glUniform3f(g_ke_uniform, mat.emission[0], mat.emission[1], mat.emission[2]);
+            glUniform1f(g_ns_uniform, mat.shininess);
+            glUniform1f(g_opacity_uniform, mat.dissolve);
+
             DrawVirtualObject(shape.name.c_str());
+        };
+
+		//std::map<float, const tinyobj::shape_t*> transparent_shapes;
+		std::vector<const tinyobj::shape_t*> transparent_shapes;
+
+        // OPAQUE PASS
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+
+        // Desenhamos o modelo do carro ZR1
+        for(const auto& shape : car_zr1_model.shapes)
+        {
+            int material_idx = shape.mesh.material_ids[0];
+            const auto& mat = car_zr1_model.materials[material_idx];
+            GLuint opacity_text_id = opacity_texture_ids[material_idx];
+            bool is_transparent = (opacity_text_id != max_gluint) || (mat.dissolve < 0.999f);
+            if(is_transparent)
+            {
+				transparent_shapes.push_back(&shape);
+            }
+            else
+            {
+                draw_shape(shape);
+            }
         }
 
-        // Desenhamos o plano do chão
-        model = Matrix_Translate(0.0f,-1.1f,0.0f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, PLANE);
-        glActiveTexture(GL_TEXTURE0);
-        glUniform1i(g_has_texture_uniform, true);
-        glBindTexture(GL_TEXTURE_2D, plane_text_id);
-        glUniform1i(g_texture_uniform, 0);
-        DrawVirtualObject("the_plane");
+        // TRANSPARENT PASS
+        glEnable(GL_BLEND);
+        glDepthMask(GL_FALSE);
 
+        for (const auto& shape : transparent_shapes)
+        {
+			draw_shape(*shape);
+        }
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0); // unbind
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0); // unbind
+        glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, 0); // unbind
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
@@ -710,7 +825,8 @@ void LoadShadersFromFiles()
     //       o-- shader_fragment.glsl
     //
     GLuint vertex_shader_id = LoadShader_Vertex("../../src/shader_vertex.glsl");
-    GLuint fragment_shader_id = LoadShader_Fragment("../../src/shader_fragment.glsl");
+    //GLuint fragment_shader_id = LoadShader_Fragment("../../src/shader_fragment.glsl");
+    GLuint fragment_shader_id = LoadShader_Fragment("../../src/shader_fragment_blinn_phong.glsl");
 
     // Deletamos o programa de GPU anterior, caso ele exista.
     if ( g_GpuProgramID != 0 )
@@ -728,15 +844,23 @@ void LoadShadersFromFiles()
     g_object_id_uniform   = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
     g_bbox_min_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_max");
-    g_texture_uniform     = glGetUniformLocation(g_GpuProgramID, "texture_sampler");
-	g_has_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_texture");
+	g_has_kd_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_kd_texture");
+	g_has_ke_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_ke_texture");
+	g_has_opacity_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_opacity_texture");
 	g_kd_uniform          = glGetUniformLocation(g_GpuProgramID, "kd");
+	g_ks_uniform          = glGetUniformLocation(g_GpuProgramID, "ks");
+	g_ke_uniform          = glGetUniformLocation(g_GpuProgramID, "ke");
+	g_ns_uniform          = glGetUniformLocation(g_GpuProgramID, "ns");
+	g_opacity_uniform          = glGetUniformLocation(g_GpuProgramID, "opacity");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
+    g_texture_uniform_0 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_kd");
+    g_texture_uniform_1 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_ke");
+    g_texture_uniform_2 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_opacity");
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
     glUseProgram(0);
 }
 
