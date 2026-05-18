@@ -450,6 +450,15 @@ int main(int argc, char* argv[])
 
     BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
 
+    std::unordered_map<std::string, float> wheels_rotation_angles{};
+    for(auto& shape : car_zr1_model.shapes)
+    {
+        if (shape.name.find("Wheel") != std::string::npos)
+        {
+			wheels_rotation_angles.emplace(shape.name, 0.0f);
+        }
+    }
+
     if ( argc > 1 )
     {
         ObjModel model(argv[1]);
@@ -516,6 +525,7 @@ int main(int argc, char* argv[])
             camera_position -= camera_right * float(camera_move_speed * delta_time);
         }
 
+        // Car movement update
         static constexpr float max_car_speed = 64.0f;
         static constexpr float car_acceleration = 16.0f;
         static constexpr float asphalt_friction = 0.7f;
@@ -534,6 +544,8 @@ int main(int argc, char* argv[])
 
         car_speed = std::clamp(car_speed, 0.0f, max_car_speed);
 
+
+        // Car animation path update
         static glm::vec3 cur_curve_pos = glm::vec4(curve_points.front(), 1);
         static int32_t cur_curve_point = 0;
 
@@ -668,11 +680,26 @@ int main(int argc, char* argv[])
 
         auto draw_shape = [&](const tinyobj::shape_t& shape)
         {
-            model = Matrix_Translate(car_world_pos.x, car_world_pos.y, car_world_pos.z) 
+            constexpr float car_scale = 0.5;
+            glm::mat4 wheel_rotation = Matrix_Identity();
+            if (shape.name.find("Wheel.") != std::string::npos)
+            {
+			    glm::vec3 center = (g_VirtualScene[shape.name].bbox_min + g_VirtualScene[shape.name].bbox_max) / 2.0f;
+                float radius = center.y * car_scale;
+                wheels_rotation_angles[shape.name] += (car_speed / radius) * float(delta_time);
+
+				wheel_rotation = Matrix_Translate(center.x, center.y, center.z)
+                    * Matrix_Rotate_X(wheels_rotation_angles[shape.name])
+                    * Matrix_Translate(-center.x, -center.y, -center.z);
+            }
+
+            model = Matrix_Translate(car_world_pos.x, car_world_pos.y, car_world_pos.z)
                 * Matrix_Rotate_X(glm::radians(car_world_rotation.x))
                 * Matrix_Rotate_Y(glm::radians(car_world_rotation.y))
                 * Matrix_Rotate_Z(glm::radians(car_world_rotation.z))
-                * Matrix_Scale(0.5, 0.5, 0.5);
+                * Matrix_Scale(car_scale, car_scale, car_scale)
+                * wheel_rotation;
+
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
 
             glActiveTexture(GL_TEXTURE0);
@@ -1108,7 +1135,7 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
         size_t first_index = indices.size();
         size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
 
-        const float minval = std::numeric_limits<float>::min();
+        const float minval = std::numeric_limits<float>::lowest();
         const float maxval = std::numeric_limits<float>::max();
 
         glm::vec3 bbox_min = glm::vec3(maxval,maxval,maxval);
