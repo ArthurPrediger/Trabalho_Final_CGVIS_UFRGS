@@ -1,0 +1,7 @@
+newmtl curve_material
+illum 2
+Ns 10.0
+Kd 1.000000 1.000000 1.000000
+Ka 1.000000 1.000000 1.000000
+Ks 1.000000 1.000000 1.000000
+map_Kd curve.png
