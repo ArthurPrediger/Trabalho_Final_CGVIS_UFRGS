@@ -120,6 +120,7 @@ void PopMatrix(glm::mat4& M);
 // logo após a definição de main() neste arquivo.
 void BuildTrianglesAndAddToVirtualScene(ObjModel*); // Constrói representação de um ObjModel como malha de triângulos para renderização
 void ComputeNormals(ObjModel* model); // Computa normais de um ObjModel, caso não existam.
+void DivideModelMeshesByMaterial(ObjModel* model);
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
 GLuint LoadTextureImage(const char* filename); // Função que carrega imagens de textura
 void DrawVirtualObject(const char* object_name); // Desenha um objeto armazenado em g_VirtualScene
@@ -369,84 +370,7 @@ int main(int argc, char* argv[])
 		material_index++;
     }
 
-    std::vector<tinyobj::shape_t> new_shapes;
-
-    for (const auto& shape : car_zr1_model.shapes)
-    {
-        // Check whether all faces use the same material
-        bool multiple_materials = false;
-
-        if (!shape.mesh.material_ids.empty())
-        {
-            int first_mat = shape.mesh.material_ids[0];
-
-            for (size_t i = 1; i < shape.mesh.material_ids.size(); i++)
-            {
-                if (shape.mesh.material_ids[i] != first_mat)
-                {
-                    multiple_materials = true;
-                    break;
-                }
-            }
-        }
-
-        // If already single-material, keep as-is
-        if (!multiple_materials)
-        {
-            new_shapes.push_back(shape);
-            continue;
-        }
-
-        // Split by material
-        std::unordered_map<int, tinyobj::shape_t> split_shapes;
-
-        size_t index_offset = 0;
-
-        for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); face++)
-        {
-            int material_id = shape.mesh.material_ids[face];
-
-            // Create split shape if necessary
-            if (split_shapes.find(material_id) == split_shapes.end())
-            {
-                tinyobj::shape_t split_shape;
-
-                split_shape.name =
-                    shape.name + "_mat_" + std::to_string(material_id);
-
-                split_shapes[material_id] = split_shape;
-            }
-
-            auto& dst_shape = split_shapes[material_id];
-
-            uint8_t fv = shape.mesh.num_face_vertices[face];
-
-            // Copy face vertex count
-            dst_shape.mesh.num_face_vertices.push_back(fv);
-
-            // Copy material id
-            dst_shape.mesh.material_ids.push_back(material_id);
-
-            // Copy indices
-            for (size_t v = 0; v < fv; v++)
-            {
-                dst_shape.mesh.indices.push_back(
-                    shape.mesh.indices[index_offset + v]
-                );
-            }
-
-            index_offset += fv;
-        }
-
-        // Append split shapes
-        for (auto& kv : split_shapes)
-        {
-            new_shapes.push_back(std::move(kv.second));
-        }
-    }
-
-    // Replace original shapes vector
-    car_zr1_model.shapes = std::move(new_shapes);
+    DivideModelMeshesByMaterial(&car_zr1_model);
 
     BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
 
@@ -1116,6 +1040,88 @@ void ComputeNormals(ObjModel* model)
         }
 
     }
+}
+
+void DivideModelMeshesByMaterial(ObjModel* model)
+{
+    std::vector<tinyobj::shape_t> new_shapes;
+
+    for (const auto& shape : model->shapes)
+    {
+        // Check whether all faces use the same material
+        bool multiple_materials = false;
+
+        if (!shape.mesh.material_ids.empty())
+        {
+            int first_mat = shape.mesh.material_ids[0];
+
+            for (size_t i = 1; i < shape.mesh.material_ids.size(); i++)
+            {
+                if (shape.mesh.material_ids[i] != first_mat)
+                {
+                    multiple_materials = true;
+                    break;
+                }
+            }
+        }
+
+        // If already single-material, keep as-is
+        if (!multiple_materials)
+        {
+            new_shapes.push_back(shape);
+            continue;
+        }
+
+        // Split by material
+        std::unordered_map<int, tinyobj::shape_t> split_shapes;
+
+        size_t index_offset = 0;
+
+        for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); face++)
+        {
+            int material_id = shape.mesh.material_ids[face];
+
+            // Create split shape if necessary
+            if (split_shapes.find(material_id) == split_shapes.end())
+            {
+                tinyobj::shape_t split_shape;
+
+                split_shape.name =
+                    shape.name + "_mat_" + std::to_string(material_id);
+
+                split_shapes[material_id] = split_shape;
+            }
+
+            auto& dst_shape = split_shapes[material_id];
+
+            uint8_t fv = shape.mesh.num_face_vertices[face];
+
+            // Copy face vertex count
+            dst_shape.mesh.num_face_vertices.push_back(fv);
+
+            // Copy material id
+            dst_shape.mesh.material_ids.push_back(material_id);
+
+            // Copy indices
+            for (size_t v = 0; v < fv; v++)
+            {
+                dst_shape.mesh.indices.push_back(
+                    shape.mesh.indices[index_offset + v]
+                );
+            }
+
+            index_offset += fv;
+        }
+
+        // Append split shapes
+        for (auto& kv : split_shapes)
+        {
+            new_shapes.push_back(std::move(kv.second));
+        }
+    }
+
+    // Replace original shapes vector
+    model->shapes = std::move(new_shapes);
 }
 
 // Constrói triângulos para futura renderização a partir de um ObjModel.
