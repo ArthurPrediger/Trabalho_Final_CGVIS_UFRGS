@@ -53,62 +53,27 @@
 
 #include "curve_path_loader.h"
 
+constexpr int32_t max_int32 = std::numeric_limits<GLuint>::max();
+
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
 struct ObjModel
 {
+    struct MaterialTexturesIds
+    {
+        int32_t diffuse_id;
+        int32_t emissive_id;
+        int32_t opacity_id;
+    };
+
     tinyobj::attrib_t                 attrib;
     std::vector<tinyobj::shape_t>     shapes;
     std::vector<tinyobj::material_t>  materials;
+    std::unordered_map<uint32_t, MaterialTexturesIds> textures_ids;
 
     // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
     // Veja: https://github.com/syoyo/tinyobjloader
-    ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true)
-    {
-        printf("Carregando objetos do arquivo \"%s\"...\n", filename);
-
-        // Se basepath == NULL, então setamos basepath como o dirname do
-        // filename, para que os arquivos MTL sejam corretamente carregados caso
-        // estejam no mesmo diretório dos arquivos OBJ.
-        std::string fullpath(filename);
-        std::string dirname;
-        if (basepath == NULL)
-        {
-            auto i = fullpath.find_last_of("/");
-            if (i != std::string::npos)
-            {
-                dirname = fullpath.substr(0, i+1);
-                basepath = dirname.c_str();
-            }
-        }
-
-        std::string warn;
-        std::string err;
-        bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, basepath, triangulate);
-
-        if (!err.empty())
-            fprintf(stderr, "\n%s\n", err.c_str());
-
-        if (!ret)
-            throw std::runtime_error("Erro ao carregar modelo.");
-
-        for (size_t shape = 0; shape < shapes.size(); ++shape)
-        {
-            if (shapes[shape].name.empty())
-            {
-                fprintf(stderr,
-                        "*********************************************\n"
-                        "Erro: Objeto sem nome dentro do arquivo '%s'.\n"
-                        "Veja https://www.inf.ufrgs.br/~eslgastal/fcg-faq-etc.html#Modelos-3D-no-formato-OBJ .\n"
-                        "*********************************************\n",
-                    filename);
-                throw std::runtime_error("Objeto sem nome.");
-            }
-            printf("- Objeto '%s'\n", shapes[shape].name.c_str());
-        }
-
-        printf("OK.\n");
-    }
+    ObjModel(const char* filepath, const char* basepath = NULL, bool triangulate = true);
 };
 
 
@@ -334,44 +299,10 @@ int main(int argc, char* argv[])
     ObjModel curve_model("../../data/curve/curve.obj");
     ComputeNormals(&curve_model);
     BuildTrianglesAndAddToVirtualScene(&curve_model);
-    GLuint curve_text_id = LoadTextureImage("../../data/curve/curve.png");
 
     ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
     ComputeNormals(&car_zr1_model);
-
-	constexpr GLuint max_gluint = std::numeric_limits<GLuint>::max();
-	std::vector<GLuint> kd_texture_ids(car_zr1_model.materials.size(), max_gluint);
-	std::vector<GLuint> ke_texture_ids(car_zr1_model.materials.size(), max_gluint);
-	std::vector<GLuint> opacity_texture_ids(car_zr1_model.materials.size(), max_gluint);
-	int32_t material_index = 0;
-    for (const auto& mat : car_zr1_model.materials)
-    {
-		if(!mat.diffuse_texname.empty())
-        {
-           std::string text_path = "../../data/zr1_model/" + mat.diffuse_texname;
-
-		   kd_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
-        }
-
-        if (!mat.emissive_texname.empty())
-        {
-            std::string text_path = "../../data/zr1_model/" + mat.emissive_texname;
-
-            ke_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
-        }
-
-        if (!mat.alpha_texname.empty())
-        {
-            std::string text_path = "../../data/zr1_model/" + mat.alpha_texname;
-
-            opacity_texture_ids[material_index] = LoadTextureImage(text_path.c_str());
-        }
-
-		material_index++;
-    }
-
     DivideModelMeshesByMaterial(&car_zr1_model);
-
     BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
 
     std::unordered_map<std::string, float> wheels_rotation_angles{};
@@ -588,7 +519,7 @@ int main(int argc, char* argv[])
         glUniform3f(g_ke_uniform, 0, 0, 0);
         glUniform1f(g_ns_uniform, 0);
         glUniform1f(g_opacity_uniform, 1);
-        glBindTexture(GL_TEXTURE_2D, curve_text_id);
+        glBindTexture(GL_TEXTURE_2D, curve_model.textures_ids.find(0)->second.diffuse_id);
         DrawVirtualObject(curve_model.shapes[0].name.c_str());
 
         auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
@@ -628,16 +559,14 @@ int main(int argc, char* argv[])
 
             glActiveTexture(GL_TEXTURE0);
             int material_idx = shape.mesh.material_ids[0];
-            const auto& mat = car_zr1_model.materials[material_idx];
-            GLuint kd_text_id = kd_texture_ids[material_idx];
-            GLuint ke_text_id = ke_texture_ids[material_idx];
-            GLuint opacity_text_id = opacity_texture_ids[material_idx];
-            if (kd_text_id != max_gluint)
+			const auto& textures_ids_it = car_zr1_model.textures_ids.find(material_idx);
+			bool has_any_texture = (textures_ids_it != car_zr1_model.textures_ids.end());
+            if (has_any_texture && textures_ids_it->second.diffuse_id != max_int32)
             {
                 glUniform1i(g_has_kd_texture_uniform, true);
 
                 glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, kd_text_id);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.diffuse_id);
             }
             else
             {
@@ -646,12 +575,12 @@ int main(int argc, char* argv[])
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
-            if (ke_text_id != max_gluint)
+            if (has_any_texture && textures_ids_it->second.emissive_id != max_int32)
             {
                 glUniform1i(g_has_ke_texture_uniform, true);
 
                 glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, ke_text_id);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.emissive_id);
             }
             else
             {
@@ -660,12 +589,12 @@ int main(int argc, char* argv[])
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
-            if (opacity_text_id != max_gluint)
+            if (has_any_texture && textures_ids_it->second.opacity_id != max_int32)
             {
                 glUniform1i(g_has_opacity_texture_uniform, true);
 
                 glActiveTexture(GL_TEXTURE2);
-                glBindTexture(GL_TEXTURE_2D, opacity_text_id);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.opacity_id);
             }
             else
             {
@@ -675,6 +604,7 @@ int main(int argc, char* argv[])
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
 
+            const auto& mat = car_zr1_model.materials[material_idx];
             glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
             glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
             glUniform3f(g_ke_uniform, mat.emission[0], mat.emission[1], mat.emission[2]);
@@ -696,8 +626,9 @@ int main(int argc, char* argv[])
         {
             int material_idx = shape.mesh.material_ids[0];
             const auto& mat = car_zr1_model.materials[material_idx];
-            GLuint opacity_text_id = opacity_texture_ids[material_idx];
-            bool is_transparent = (opacity_text_id != max_gluint) || (mat.dissolve < 0.999f);
+            const auto& textures_ids_it = car_zr1_model.textures_ids.find(material_idx);
+            bool is_transparent = (mat.dissolve < 0.999f) || 
+                (textures_ids_it != car_zr1_model.textures_ids.end() && textures_ids_it->second.opacity_id != max_int32);
             if(is_transparent)
             {
 				transparent_shapes.push_back(&shape);
@@ -1932,3 +1863,84 @@ void PrintObjModelInfo(ObjModel* model)
 // set makeprg=cd\ ..\ &&\ make\ run\ >/dev/null
 // vim: set spell spelllang=pt_br :
 
+ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
+{
+    printf("Carregando objetos do arquivo \"%s\"...\n", filepath);
+
+    // Se basepath == NULL, então setamos basepath como o dirname do
+    // filename, para que os arquivos MTL sejam corretamente carregados caso
+    // estejam no mesmo diretório dos arquivos OBJ.
+    std::string fullpath(filepath);
+    std::string dirname;
+    if (basepath == NULL)
+    {
+        auto i = fullpath.find_last_of("/");
+        if (i != std::string::npos)
+        {
+            dirname = fullpath.substr(0, i + 1);
+            basepath = dirname.c_str();
+        }
+    }
+
+    std::string warn;
+    std::string err;
+    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filepath, basepath, triangulate);
+
+    if (!err.empty())
+        fprintf(stderr, "\n%s\n", err.c_str());
+
+    if (!ret)
+        throw std::runtime_error("Erro ao carregar modelo.");
+
+    for (size_t shape = 0; shape < shapes.size(); ++shape)
+    {
+        if (shapes[shape].name.empty())
+        {
+            fprintf(stderr,
+                "*********************************************\n"
+                "Erro: Objeto sem nome dentro do arquivo '%s'.\n"
+                "Veja https://www.inf.ufrgs.br/~eslgastal/fcg-faq-etc.html#Modelos-3D-no-formato-OBJ .\n"
+                "*********************************************\n",
+                filepath);
+            throw std::runtime_error("Objeto sem nome.");
+        }
+        printf("- Objeto '%s'\n", shapes[shape].name.c_str());
+    }
+
+    printf("OK.\n");
+
+    int32_t material_index = 0;
+    for (const auto& mat : materials)
+    {
+        bool has_any_texture = false;
+        MaterialTexturesIds mat_textures_ids = { max_int32, max_int32, max_int32 };
+
+        if (!mat.diffuse_texname.empty())
+        {
+            std::string text_path = dirname + mat.diffuse_texname;
+
+            mat_textures_ids.diffuse_id = LoadTextureImage(text_path.c_str());
+            has_any_texture = true;
+        }
+
+        if (!mat.emissive_texname.empty())
+        {
+            std::string text_path = dirname + mat.emissive_texname;
+
+            mat_textures_ids.emissive_id = LoadTextureImage(text_path.c_str());
+            has_any_texture = true;
+        }
+
+        if (!mat.alpha_texname.empty())
+        {
+            std::string text_path = dirname + mat.alpha_texname;
+
+            mat_textures_ids.opacity_id = LoadTextureImage(text_path.c_str());
+            has_any_texture = true;
+        }
+
+        if (has_any_texture) textures_ids.emplace(material_index, mat_textures_ids);
+
+        material_index++;
+    }
+}
