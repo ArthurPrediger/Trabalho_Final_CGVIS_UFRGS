@@ -25,6 +25,7 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <array>
 #include <limits>
 #include <fstream>
 #include <sstream>
@@ -77,6 +78,13 @@ public:
     std::vector<tinyobj::shape_t>     shapes;
     std::vector<tinyobj::material_t>  materials;
     std::unordered_map<uint32_t, MaterialTexturesIds> textures_ids;
+
+    // Data per submesh/shape
+    std::vector<size_t>       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
+    std::vector<size_t>       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
+    std::vector<GLuint>       vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
+    std::vector<glm::vec3>    bbox_min; // Axis-Aligned Bounding Box do objeto
+    std::vector<glm::vec3>    bbox_max;
 };
 
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
@@ -85,17 +93,17 @@ public:
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
-void BuildTrianglesAndAddToVirtualScene(ObjModel*); // Constrói representação de um ObjModel como malha de triângulos para renderização
-void ComputeNormals(ObjModel* model); // Computa normais de um ObjModel, caso não existam.
-void DivideModelMeshesByMaterial(ObjModel* model);
+void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model); // Constrói representação de um ObjModel como malha de triângulos para renderização
+void ComputeNormals(std::shared_ptr<ObjModel> model); // Computa normais de um ObjModel, caso não existam.
+void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model);
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
 GLuint LoadTextureImage(const char* filename); // Função que carrega imagens de textura
-void DrawVirtualObject(const char* object_name); // Desenha um objeto armazenado em g_VirtualScene
+void DrawVirtualObject(std::shared_ptr<SceneObjectComp> virtual_scene_obj_component); // Desenha um objeto armazenado em g_VirtualScene
 GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
 void LoadShader(const char* filename, GLuint shader_id); // Função utilizada pelas duas acima
 GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id); // Cria um programa de GPU
-void PrintObjModelInfo(ObjModel*); // Função para debugging
+void PrintObjModelInfo(std::shared_ptr<ObjModel> model); // Função para debugging
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
@@ -125,9 +133,28 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
+// New user structs
+struct Car
+{
+	std::shared_ptr<Entity> entity;
+	float speed;
+	std::array<int32_t, 2> input_keys;
+    std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps;
+    std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps;
+    int32_t cur_curve_point;
+    glm::vec3 cur_curve_pos;
+};
+
+struct Track
+{
+    std::shared_ptr<Entity> entity;
+	std::vector<glm::vec3> points;
+};
+
 // New user functions declarations
-void DrawEntity(const Entity* entity);
-std::vector<std::shared_ptr<Component>> GetSceneObjectsByModelName(const std::string& model_name);
+void DrawEntity(const std::shared_ptr<Entity> entity);
+std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
+void UpdateCarEntity(double delta_time, Car* car, Track* track);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -135,9 +162,8 @@ std::vector<std::shared_ptr<Component>> GetSceneObjectsByModelName(const std::st
 // (map).  Veja dentro da função BuildTrianglesAndAddToVirtualScene() como que são incluídos
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
-std::unordered_map<std::string, ObjModel> g_loaded_models;
-std::unordered_map<std::string, std::shared_ptr<SceneObjectComp>> g_virtual_scene;
-std::unordered_map<uint32_t, std::vector<std::shared_ptr<SceneObjectComp>>> g_entities_scene_objs;
+std::unordered_map<std::string, std::shared_ptr<ObjModel>> g_loaded_models;
+std::unordered_map<uint32_t, std::vector<std::shared_ptr<SceneObjectComp>>> g_entities_virtual_scene_objs;
 
 // Pilha que guardará as matrizes de modelagem.
 //std::stack<glm::mat4>  g_MatrixStack;
@@ -291,45 +317,79 @@ int main(int argc, char* argv[])
     //
     LoadShadersFromFiles();
 
-    ObjModel curve_model("../../data/curve/curve.obj");
-    ComputeNormals(&curve_model);
-    BuildTrianglesAndAddToVirtualScene(&curve_model);
-	g_loaded_models.emplace(curve_model.filepath, curve_model);
+    std::shared_ptr<ObjModel> curve_model = std::make_shared<ObjModel>("../../data/curve/curve.obj");
+    ComputeNormals(curve_model);
+    BuildTrianglesAndBuffers(curve_model);
+	g_loaded_models.emplace(curve_model->filepath, curve_model);
 
-    Entity curve_entity("track");
-    curve_entity.AddComponents(GetSceneObjectsByModelName(curve_model.filepath));
-    g_entities_scene_objs.emplace(curve_entity.GetId(), curve_entity.GetComponentsByType<SceneObjectComp>());
-	curve_entity.root->scale = { 0.5f, 0.5f, 0.5f };
+    std::shared_ptr<Entity> curve_entity = std::make_shared<Entity>("track");
+    curve_entity->AddComponents(CreateSceneObjectComponentsForModelByName(curve_model->filepath));
+    g_entities_virtual_scene_objs.emplace(curve_entity->GetId(), curve_entity->GetComponentsByType<SceneObjectComp>());
+	curve_entity->root->scale = { 0.5f, 0.5f, 0.5f };
 
-    ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
-    ComputeNormals(&car_zr1_model);
-    DivideModelMeshesByMaterial(&car_zr1_model);
-    BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
-    g_loaded_models.emplace(car_zr1_model.filepath, car_zr1_model);
+    std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
 
-	Entity zr1_car_entity("ZR1_car");
-	zr1_car_entity.AddComponents(GetSceneObjectsByModelName(car_zr1_model.filepath));
-    g_entities_scene_objs.emplace(zr1_car_entity.GetId(), zr1_car_entity.GetComponentsByType<SceneObjectComp>());
-	zr1_car_entity.root->scale = { 0.5f, 0.5f, 0.5f };
-
-    std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps{};
-    std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps{};
-    for(std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car_entity.GetComponentsByType<SceneObjectComp>())
+	Track track
     {
-		if(scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
+		.entity = curve_entity,
+		.points = curve_points
+	};
+
+    std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
+    ComputeNormals(car_zr1_model);
+    DivideModelMeshesByMaterial(car_zr1_model);
+    BuildTrianglesAndBuffers(car_zr1_model);
+    g_loaded_models.emplace(car_zr1_model->filepath, car_zr1_model);
+
+    std::shared_ptr<Entity> zr1_car_entity_0 = std::make_shared<Entity>("ZR1_car_0");
+	zr1_car_entity_0->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
+    g_entities_virtual_scene_objs.emplace(zr1_car_entity_0->GetId(), zr1_car_entity_0->GetComponentsByType<SceneObjectComp>());
+	zr1_car_entity_0->root->scale = { 0.5f, 0.5f, 0.5f };
+
+    Car zr1_car0
+    {
+        .entity = zr1_car_entity_0,
+        .speed = 0.0f,
+        .input_keys = { GLFW_KEY_Z, GLFW_KEY_C },
+        .wheels_scene_obj_comps = {},
+        .wheels_transform_comps = {},
+        .cur_curve_point = 0,
+        .cur_curve_pos = track.points.front()
+    };
+
+    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0.entity->GetComponentsByType<SceneObjectComp>())
+    {
+        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
         {
-            wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            wheels_scene_obj_comps.push_back(scene_obj_comp);
-		}
+            zr1_car0.wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            zr1_car0.wheels_scene_obj_comps.push_back(scene_obj_comp);
+        }
     }
 
-    if ( argc > 1 )
+    std::shared_ptr<Entity> zr1_car_entity_1 = std::make_shared<Entity>("ZR1_car_1");
+    zr1_car_entity_1->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
+    g_entities_virtual_scene_objs.emplace(zr1_car_entity_1->GetId(), zr1_car_entity_1->GetComponentsByType<SceneObjectComp>());
+    zr1_car_entity_1->root->scale = { 0.5f, 0.5f, 0.5f };
+
+    Car zr1_car1
     {
-        ObjModel model(argv[1]);
-        BuildTrianglesAndAddToVirtualScene(&model);
-    }
+        .entity = zr1_car_entity_1,
+        .speed = 0.0f,
+        .input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN },
+        .wheels_scene_obj_comps = {},
+        .wheels_transform_comps = {},
+        .cur_curve_point = 0,
+		.cur_curve_pos = track.points.front()
+    };
 
-	std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
+    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1.entity->GetComponentsByType<SceneObjectComp>())
+    {
+        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
+        {
+            zr1_car1.wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            zr1_car1.wheels_scene_obj_comps.push_back(scene_obj_comp);
+        }
+    }
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -389,78 +449,9 @@ int main(int argc, char* argv[])
             camera_position -= camera_right * float(camera_move_speed * delta_time);
         }
 
-        // Car movement update
-        static constexpr float max_car_speed = 64.0f;
-        static constexpr float car_acceleration = 16.0f;
-        static constexpr float asphalt_friction = 0.7f;
-        static float car_speed = 0.0f;
-
-        if (keys[GLFW_KEY_UP])
-        {
-            car_speed += car_acceleration * float(delta_time);
-        }
-        else if (keys[GLFW_KEY_DOWN])
-        {
-            car_speed -= car_acceleration * float(delta_time);
-        }
-
-        car_speed *= powf(asphalt_friction, float(delta_time));
-
-        car_speed = std::clamp(car_speed, 0.0f, max_car_speed);
-
-
-        // Car animation path update
-        static glm::vec3 cur_curve_pos = glm::vec4(curve_points.front(), 1);
-        static int32_t cur_curve_point = 0;
-
-        int32_t next_point = (cur_curve_point + 1) % curve_points.size();
-        glm::vec3 car_forward(0.0f);
-        while (true)
-        {
-            car_forward = glm::normalize(curve_points[next_point] - curve_points[cur_curve_point]);
-            glm::vec3 new_curve_pos = cur_curve_pos + car_speed * (float)delta_time * car_forward;
-
-            if (glm::dot(car_forward, curve_points[next_point] - new_curve_pos) < 0)
-            {
-                next_point = (next_point + 1) % curve_points.size();
-                new_curve_pos = cur_curve_pos;
-            }
-            else
-            {
-                cur_curve_pos = new_curve_pos;
-                cur_curve_point = next_point - 1;
-                if (cur_curve_point < 0 || cur_curve_point >= curve_points.size())
-                    cur_curve_point = 0;
-                break;
-            }
-        }
-
-        auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
-        if (car_forward.x < 0)
-            theta = glm::degrees(glm::two_pi<float>()) - theta;
-
-        auto phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
-        if (car_forward.z > 0)
-            phi = glm::degrees(glm::two_pi<float>()) - phi;
-
-        glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
-        model *= Matrix_Scale(curve_entity.root->scale.x, curve_entity.root->scale.y, curve_entity.root->scale.z);
-        glm::vec3 car_world_rotation = { phi, theta, 0 };
-        glm::vec3 car_world_pos = model * glm::vec4(cur_curve_pos, 1.0f);
-
-        zr1_car_entity.root->position = car_world_pos;
-        zr1_car_entity.root->rotation = car_world_rotation;
-
-        // Car wheels animation update
-
-        for (int32_t i = 0; i < wheels_scene_obj_comps.size(); ++i)
-        {
-            std::shared_ptr<SceneObjectComp> scene_obj_comp = wheels_scene_obj_comps[i];
-            std::shared_ptr<TransformComp> wheel_transform_comp = wheels_transform_comps[i];
-            glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
-            float radius = center.y * zr1_car_entity.root->scale.x;
-            wheel_transform_comp->rotation.x += glm::degrees((car_speed / radius) * float(delta_time));
-        }
+        // Cars movement and animation updates based on user input
+		UpdateCarEntity(delta_time, &zr1_car0, &track);
+		UpdateCarEntity(delta_time, &zr1_car1, &track);
 
         // Aqui executamos as operações de renderização
 
@@ -542,10 +533,13 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
 
         // Desenhamos a pista
-		DrawEntity(&curve_entity);
+		DrawEntity(curve_entity);
 
         // Desenhamos o carro
-        DrawEntity(&zr1_car_entity);
+        DrawEntity(zr1_car_entity_0);
+
+        // Desenhamos o carro
+        DrawEntity(zr1_car_entity_1);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -630,17 +624,17 @@ GLuint LoadTextureImage(const char* filename)
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
 // dos objetos na função BuildTrianglesAndAddToVirtualScene().
-void DrawVirtualObject(const char* object_name)
+void DrawVirtualObject(std::shared_ptr<SceneObjectComp> virtual_scene_obj_component)
 {
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
     // comentários detalhados dentro da definição de BuildTrianglesAndAddToVirtualScene().
-    glBindVertexArray(g_virtual_scene[object_name]->vertex_array_object_id);
+    glBindVertexArray(virtual_scene_obj_component->vertex_array_object_id);
 
     // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
     // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
-    glm::vec3 bbox_min = g_virtual_scene[object_name]->bbox_min;
-    glm::vec3 bbox_max = g_virtual_scene[object_name]->bbox_max;
+    glm::vec3 bbox_min = virtual_scene_obj_component->bbox_min;
+    glm::vec3 bbox_max = virtual_scene_obj_component->bbox_max;
     glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
 
@@ -650,10 +644,10 @@ void DrawVirtualObject(const char* object_name)
     // a documentação da função glDrawElements() em
     // http://docs.gl/gl3/glDrawElements.
     glDrawElements(
-        g_virtual_scene[object_name]->rendering_mode,
-        g_virtual_scene[object_name]->num_indices,
+        virtual_scene_obj_component->rendering_mode,
+        virtual_scene_obj_component->num_indices,
         GL_UNSIGNED_INT,
-        (void*)(g_virtual_scene[object_name]->first_index * sizeof(GLuint))
+        (void*)(virtual_scene_obj_component->first_index * sizeof(GLuint))
     );
 
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
@@ -724,29 +718,9 @@ void LoadShadersFromFiles()
     glUseProgram(0);
 }
 
-//// Função que pega a matriz M e guarda a mesma no topo da pilha
-//void PushMatrix(glm::mat4 M)
-//{
-//    g_MatrixStack.push(M);
-//}
-//
-//// Função que remove a matriz atualmente no topo da pilha e armazena a mesma na variável M
-//void PopMatrix(glm::mat4& M)
-//{
-//    if ( g_MatrixStack.empty() )
-//    {
-//        M = Matrix_Identity();
-//    }
-//    else
-//    {
-//        M = g_MatrixStack.top();
-//        g_MatrixStack.pop();
-//    }
-//}
-
 // Função que computa as normais de um ObjModel, caso elas não tenham sido
 // especificadas dentro do arquivo ".obj"
-void ComputeNormals(ObjModel* model)
+void ComputeNormals(std::shared_ptr<ObjModel> model)
 {
     if ( !model->attrib.normals.empty() )
         return;
@@ -862,7 +836,7 @@ void ComputeNormals(ObjModel* model)
     }
 }
 
-void DivideModelMeshesByMaterial(ObjModel* model)
+void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model)
 {
     std::vector<tinyobj::shape_t> new_shapes;
 
@@ -945,7 +919,7 @@ void DivideModelMeshesByMaterial(ObjModel* model)
 }
 
 // Constrói triângulos para futura renderização a partir de um ObjModel.
-void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
+void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
@@ -961,8 +935,8 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
         size_t first_index = indices.size();
         size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
 
-        const float minval = std::numeric_limits<float>::lowest();
-        const float maxval = std::numeric_limits<float>::max();
+        constexpr float minval = std::numeric_limits<float>::lowest();
+        constexpr float maxval = std::numeric_limits<float>::max();
 
         glm::vec3 bbox_min = glm::vec3(maxval,maxval,maxval);
         glm::vec3 bbox_max = glm::vec3(minval,minval,minval);
@@ -1021,20 +995,11 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
 
         size_t last_index = indices.size() - 1;
 
-        std::shared_ptr<SceneObjectComp> theobject = std::make_shared<SceneObjectComp>();
-        theobject->object_name = model->shapes[shape].name;
-        theobject->first_index    = first_index; // Primeiro índice
-        theobject->num_indices    = last_index - first_index + 1; // Número de indices
-        theobject->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        theobject->vertex_array_object_id = vertex_array_object_id;
-
-        theobject->bbox_min = bbox_min;
-        theobject->bbox_max = bbox_max;
-
-        theobject->model = model;
-        theobject->submesh_index = shape;
-
-        g_virtual_scene[model->shapes[shape].name] = theobject;
+        model->first_index.push_back(first_index); // Primeiro índice
+        model->num_indices.push_back(last_index - first_index + 1); // Número de indices
+        model->vertex_array_object_id.push_back(vertex_array_object_id);
+        model->bbox_min.push_back(bbox_min);
+        model->bbox_max.push_back(bbox_max);
     }
 
     GLuint VBO_model_coefficients_id;
@@ -1586,7 +1551,7 @@ void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
 // Função para debugging: imprime no terminal todas informações de um modelo
 // geométrico carregado de um arquivo ".obj".
 // Veja: https://github.com/syoyo/tinyobjloader/blob/22883def8db9ef1f3ffb9b404318e7dd25fdbb51/loader_example.cc#L98
-void PrintObjModelInfo(ObjModel* model)
+void PrintObjModelInfo(std::shared_ptr<ObjModel> model)
 {
   const tinyobj::attrib_t                & attrib    = model->attrib;
   const std::vector<tinyobj::shape_t>    & shapes    = model->shapes;
@@ -1838,15 +1803,15 @@ ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
     }
 }
 
-void DrawEntity(const Entity* entity)
+void DrawEntity(const std::shared_ptr<Entity> entity)
 {
-    const std::vector<std::shared_ptr<SceneObjectComp>>& scene_obj_components = g_entities_scene_objs[entity->GetId()];
+    const std::vector<std::shared_ptr<SceneObjectComp>>& scene_obj_components = g_entities_virtual_scene_objs[entity->GetId()];
 
     if (scene_obj_components.empty()) return;
 
     auto draw_shape = [&](std::shared_ptr<SceneObjectComp> scene_obj_comp)
         {
-            ObjModel* model_to_draw = scene_obj_comp->model;
+            std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
             const tinyobj::shape_t& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
 
             glm::mat4 local_comp_transform_mat = Matrix_Identity();
@@ -1929,7 +1894,7 @@ void DrawEntity(const Entity* entity)
             glUniform1f(g_ns_uniform, mat.shininess);
             glUniform1f(g_opacity_uniform, mat.dissolve);
 
-            DrawVirtualObject(shape.name.c_str());
+            DrawVirtualObject(scene_obj_comp);
         };
 
     //std::map<float, const tinyobj::shape_t*> transparent_shapes;
@@ -1941,7 +1906,7 @@ void DrawEntity(const Entity* entity)
 
     for (const auto& scene_obj_comp : scene_obj_components)
     {
-		ObjModel* model_to_draw = scene_obj_comp->model;
+        std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
 		const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
 
         int material_idx = shape.mesh.material_ids[0];
@@ -1965,7 +1930,7 @@ void DrawEntity(const Entity* entity)
 
     for (const auto& scene_obj_comp : scene_obj_components)
     {
-        ObjModel* model_to_draw = scene_obj_comp->model;
+        std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
         const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
 
         draw_shape(scene_obj_comp);
@@ -1982,18 +1947,103 @@ void DrawEntity(const Entity* entity)
     glBindTexture(GL_TEXTURE_2D, 0); // unbind
 }
 
-std::vector<std::shared_ptr<Component>> GetSceneObjectsByModelName(const std::string& model_name)
+std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name)
 {
-	std::vector<std::shared_ptr<Component>> result;
+	std::vector<std::shared_ptr<SceneObjectComp>> result;
 
     auto it = g_loaded_models.find(model_name);
 
 	if (it == g_loaded_models.end()) return result;
 
-    for(const auto& shape : it->second.shapes)
+	std::shared_ptr<ObjModel> model = it->second;
+
+    for(int32_t shape_index = 0; shape_index < model->shapes.size(); ++shape_index)
     {
-		result.push_back(g_virtual_scene[shape.name]);
+        std::shared_ptr<SceneObjectComp> scene_object = std::make_shared<SceneObjectComp>();
+        scene_object->object_name = model->shapes[shape_index].name;
+        scene_object->first_index    = model->first_index[shape_index]; // Primeiro índice
+        scene_object->num_indices    = model->num_indices[shape_index]; // Número de indices
+        scene_object->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
+        scene_object->vertex_array_object_id = model->vertex_array_object_id[shape_index];
+
+        scene_object->bbox_min = model->bbox_min[shape_index];;
+        scene_object->bbox_max = model->bbox_max[shape_index];;
+
+        scene_object->model = model;
+        scene_object->submesh_index = shape_index;
+
+		result.push_back(scene_object);
 	}
 
     return result;
+}
+
+void UpdateCarEntity(double delta_time, Car* car, Track* track)
+{
+    static constexpr float max_car_speed = 64.0f;
+    static constexpr float car_acceleration = 16.0f;
+    static constexpr float asphalt_friction = 0.7f;
+
+    if (keys[car->input_keys.at(0)])
+    {
+        car->speed += car_acceleration * float(delta_time);
+    }
+    else if (keys[car->input_keys.at(1)])
+    {
+        car->speed -= car_acceleration * float(delta_time);
+    }
+
+    car->speed *= powf(asphalt_friction, float(delta_time));
+
+    car->speed = std::clamp(car->speed, 0.0f, max_car_speed);
+
+    // Car animation path update
+    int32_t next_point = (car->cur_curve_point + 1) % track->points.size();
+    glm::vec3 car_forward(0.0f);
+    while (true)
+    {
+        car_forward = glm::normalize(track->points[next_point] - track->points[car->cur_curve_point]);
+        glm::vec3 new_curve_pos = car->cur_curve_pos + car->speed * (float)delta_time * car_forward;
+
+        if (glm::dot(car_forward, track->points[next_point] - new_curve_pos) < 0)
+        {
+            next_point = (next_point + 1) % track->points.size();
+            new_curve_pos = car->cur_curve_pos;
+        }
+        else
+        {
+            car->cur_curve_pos = new_curve_pos;
+            car->cur_curve_point = next_point - 1;
+            if (car->cur_curve_point < 0 || car->cur_curve_point >= track->points.size()) 
+                car->cur_curve_point = 0;
+            break;
+        }
+    }
+
+    auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
+    if (car_forward.x < 0)
+        theta = glm::degrees(glm::two_pi<float>()) - theta;
+
+    auto phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
+    if (car_forward.z > 0)
+        phi = glm::degrees(glm::two_pi<float>()) - phi;
+
+    glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
+    model *= Matrix_Scale(track->entity->root->scale.x, track->entity->root->scale.y, track->entity->root->scale.z);
+    glm::vec3 car_world_rotation = { phi, theta, 0 };
+    glm::vec3 car_world_pos = model * glm::vec4(car->cur_curve_pos, 1.0f);
+
+    car->entity->root->position = car_world_pos;
+    car->entity->root->rotation = car_world_rotation;
+
+    // Car wheels animation update
+
+    for (int32_t i = 0; i < car->wheels_scene_obj_comps.size(); ++i)
+    {
+        std::shared_ptr<SceneObjectComp> scene_obj_comp = car->wheels_scene_obj_comps[i];
+        std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
+        glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
+        float radius = center.y * car->entity->root->scale.x;
+        wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
+    }
 }

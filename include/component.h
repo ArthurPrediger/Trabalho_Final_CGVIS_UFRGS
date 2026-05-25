@@ -84,6 +84,6 @@ public:
 	glm::vec3    bbox_min; // Axis-Aligned Bounding Box do objeto
 	glm::vec3    bbox_max;
 
-	class ObjModel*  model;
+	std::shared_ptr<class ObjModel>  model;
 	uint32_t submesh_index;     // Índice do submesh dentro do modelo 3D (objeto do tipo ObjModel, definido em objloader.h)
 };

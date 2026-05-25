@@ -17,8 +17,21 @@ public:
 	Entity& operator=(Entity&& other) noexcept = default;
 	~Entity() = default;
 
-	void AddComponent(std::shared_ptr<Component> component);
-	void AddComponents(std::vector<std::shared_ptr<Component>> components);
+	template<typename T>
+	void AddComponent(std::shared_ptr<T> component)
+	{
+		if (component == nullptr)
+			return;
+		component->owner = this;
+		components[component->GetType()].push_back(component);
+	}
+
+	template<typename T>
+	void AddComponents(std::vector<std::shared_ptr<T>> components)
+	{
+		for (auto& component : components)
+			AddComponent<T>(component);
+	}
 
 	template <typename T>
 	std::shared_ptr<T> AddComponent()
