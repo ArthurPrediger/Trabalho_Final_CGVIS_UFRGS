@@ -12,10 +12,16 @@ set(SOURCES
   src/tiny_obj_loader.cpp
   src/stb_image.cpp
   src/glad.c
+  src/element.cpp
+  src/entity.cpp
+  src/component.cpp
   src/curve_path_loader.cpp
 )
 
 set(HEADERS
+  include/element.h
+  include/entity.h
+  include/component.h
   include/curve_path_loader.h
 )
 

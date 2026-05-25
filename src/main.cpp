@@ -51,14 +51,20 @@
 #include "utils.h"
 #include "matrices.h"
 
+#include "entity.h"
 #include "curve_path_loader.h"
 
 constexpr int32_t max_int32 = std::numeric_limits<GLuint>::max();
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
-struct ObjModel
+class ObjModel
 {
+public:
+    // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
+    // Veja: https://github.com/syoyo/tinyobjloader
+    ObjModel(const char* filepath, const char* basepath = NULL, bool triangulate = true);
+
     struct MaterialTexturesIds
     {
         int32_t diffuse_id;
@@ -66,20 +72,16 @@ struct ObjModel
         int32_t opacity_id;
     };
 
+    std::string                       filepath;
     tinyobj::attrib_t                 attrib;
     std::vector<tinyobj::shape_t>     shapes;
     std::vector<tinyobj::material_t>  materials;
     std::unordered_map<uint32_t, MaterialTexturesIds> textures_ids;
-
-    // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
-    // Veja: https://github.com/syoyo/tinyobjloader
-    ObjModel(const char* filepath, const char* basepath = NULL, bool triangulate = true);
 };
 
-
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
-void PushMatrix(glm::mat4 M);
-void PopMatrix(glm::mat4& M);
+//void PushMatrix(glm::mat4 M);
+//void PopMatrix(glm::mat4& M);
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
@@ -123,18 +125,9 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
-// Definimos uma estrutura que armazenará dados necessários para renderizar
-// cada objeto da cena virtual.
-struct SceneObject
-{
-    std::string  name;        // Nome do objeto
-    size_t       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    size_t       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    GLenum       rendering_mode; // Modo de rasterização (GL_TRIANGLES, GL_TRIANGLE_STRIP, etc.)
-    GLuint       vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
-    glm::vec3    bbox_min; // Axis-Aligned Bounding Box do objeto
-    glm::vec3    bbox_max;
-};
+// New user functions declarations
+void DrawEntity(const Entity* entity);
+std::vector<std::shared_ptr<Component>> GetSceneObjectsByModelName(const std::string& model_name);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -142,10 +135,12 @@ struct SceneObject
 // (map).  Veja dentro da função BuildTrianglesAndAddToVirtualScene() como que são incluídos
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
-std::unordered_map<std::string, SceneObject> g_VirtualScene;
+std::unordered_map<std::string, ObjModel> g_loaded_models;
+std::unordered_map<std::string, std::shared_ptr<SceneObjectComp>> g_virtual_scene;
+std::unordered_map<uint32_t, std::vector<std::shared_ptr<SceneObjectComp>>> g_entities_scene_objs;
 
 // Pilha que guardará as matrizes de modelagem.
-std::stack<glm::mat4>  g_MatrixStack;
+//std::stack<glm::mat4>  g_MatrixStack;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -157,15 +152,15 @@ float g_AngleZ = 0.0f;
 
 // "g_LeftMouseButtonPressed = true" se o usuário está com o botão esquerdo do mouse
 // pressionado no momento atual. Veja função MouseButtonCallback().
-bool g_LeftMouseButtonPressed = false;
-bool g_RightMouseButtonPressed = false; // Análogo para botão direito do mouse
-bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mouse
-double last_mouse_cursor_x = 0.0;
-double last_mouse_cursor_y = 0.0;
-double mouse_cursor_delta_x = 0.0;
-double mouse_cursor_delta_y = 0.0;
+bool g_left_mouse_button_pressed = false;
+bool g_right_mouse_button_pressed = false; // Análogo para botão direito do mouse
+bool g_middle_mouse_button_pressed = false; // Análogo para botão do meio do mouse
+double g_last_mouse_cursor_x = 0.0;
+double g_last_mouse_cursor_y = 0.0;
+double g_mouse_cursor_delta_x = 0.0;
+double g_mouse_cursor_delta_y = 0.0;
 
-bool firstMouse = true;
+bool g_first_mouse = true;
 bool keys[GLFW_KEY_LAST];
 
 // Variáveis que definem a câmera em coordenadas esféricas, controladas pelo
@@ -192,13 +187,13 @@ float camera_pitch = 0.0f;
 float camera_yaw = -glm::half_pi<float>();
 constexpr float camera_move_speed = 16.0f;
 constexpr float camera_rotation_speed = 0.005f;
-double delta_time = 0.0f;
+//double delta_time = 0.0f;
 
 // Variável que controla o tipo de projeção utilizada: perspectiva ou ortográfica.
 bool g_UsePerspectiveProjection = true;
 
 // Variável que controla se o texto informativo será mostrado na tela.
-bool g_ShowInfoText = true;
+bool g_show_info_text = true;
 
 // Variáveis que definem um programa de GPU (shaders). Veja função LoadShadersFromFiles().
 GLuint g_GpuProgramID = 0;
@@ -221,7 +216,7 @@ GLint g_ns_uniform;
 GLint g_opacity_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
-GLuint g_NumLoadedTextures = 0;
+//GLuint g_NumLoadedTextures = 0;
 
 int main(int argc, char* argv[])
 {
@@ -299,19 +294,33 @@ int main(int argc, char* argv[])
     ObjModel curve_model("../../data/curve/curve.obj");
     ComputeNormals(&curve_model);
     BuildTrianglesAndAddToVirtualScene(&curve_model);
+	g_loaded_models.emplace(curve_model.filepath, curve_model);
+
+    Entity curve_entity("track");
+    curve_entity.AddComponents(GetSceneObjectsByModelName(curve_model.filepath));
+    g_entities_scene_objs.emplace(curve_entity.GetId(), curve_entity.GetComponentsByType<SceneObjectComp>());
+	curve_entity.root->scale = { 0.5f, 0.5f, 0.5f };
 
     ObjModel car_zr1_model("../../data/zr1_model/ZR1.obj");
     ComputeNormals(&car_zr1_model);
     DivideModelMeshesByMaterial(&car_zr1_model);
     BuildTrianglesAndAddToVirtualScene(&car_zr1_model);
+    g_loaded_models.emplace(car_zr1_model.filepath, car_zr1_model);
 
-    std::unordered_map<std::string, float> wheels_rotation_angles{};
-    for(auto& shape : car_zr1_model.shapes)
+	Entity zr1_car_entity("ZR1_car");
+	zr1_car_entity.AddComponents(GetSceneObjectsByModelName(car_zr1_model.filepath));
+    g_entities_scene_objs.emplace(zr1_car_entity.GetId(), zr1_car_entity.GetComponentsByType<SceneObjectComp>());
+	zr1_car_entity.root->scale = { 0.5f, 0.5f, 0.5f };
+
+    std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps{};
+    std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps{};
+    for(std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car_entity.GetComponentsByType<SceneObjectComp>())
     {
-        if (shape.name.find("Wheel") != std::string::npos)
+		if(scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
         {
-			wheels_rotation_angles.emplace(shape.name, 0.0f);
-        }
+            wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            wheels_scene_obj_comps.push_back(scene_obj_comp);
+		}
     }
 
     if ( argc > 1 )
@@ -333,20 +342,20 @@ int main(int argc, char* argv[])
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    glfwGetCursorPos(window, &last_mouse_cursor_x, &last_mouse_cursor_y);
+    glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
 
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
     while (!glfwWindowShouldClose(window))
     {
         static double last_time = 0.0f;
         const double cur_time = glfwGetTime();
-        delta_time = cur_time - last_time;
+        double delta_time = cur_time - last_time;
         last_time = cur_time;
 
         // INPUTS UPDATE
         // Camera rotation update
-        camera_yaw -= float(mouse_cursor_delta_x) * camera_rotation_speed;
-        camera_pitch += float(mouse_cursor_delta_y) * camera_rotation_speed;
+        camera_yaw -= float(g_mouse_cursor_delta_x) * camera_rotation_speed;
+        camera_pitch += float(g_mouse_cursor_delta_y) * camera_rotation_speed;
 
         camera_yaw = fmod(camera_yaw, glm::two_pi<float>());
         camera_pitch = std::clamp(camera_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
@@ -359,8 +368,8 @@ int main(int argc, char* argv[])
         camera_right = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_forward), { 0.0f, 1.0f, 0.0f })), 0.0f);
         camera_up = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_right), glm::vec3(camera_forward))), 0.0f);
 
-        mouse_cursor_delta_x = 0.0f;
-        mouse_cursor_delta_y = 0.0f;
+        g_mouse_cursor_delta_x = 0.0f;
+        g_mouse_cursor_delta_y = 0.0f;
 
         // Camera movement update
         if (keys[GLFW_KEY_W])
@@ -424,6 +433,33 @@ int main(int argc, char* argv[])
                     cur_curve_point = 0;
                 break;
             }
+        }
+
+        auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
+        if (car_forward.x < 0)
+            theta = glm::degrees(glm::two_pi<float>()) - theta;
+
+        auto phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
+        if (car_forward.z > 0)
+            phi = glm::degrees(glm::two_pi<float>()) - phi;
+
+        glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
+        model *= Matrix_Scale(curve_entity.root->scale.x, curve_entity.root->scale.y, curve_entity.root->scale.z);
+        glm::vec3 car_world_rotation = { phi, theta, 0 };
+        glm::vec3 car_world_pos = model * glm::vec4(cur_curve_pos, 1.0f);
+
+        zr1_car_entity.root->position = car_world_pos;
+        zr1_car_entity.root->rotation = car_world_rotation;
+
+        // Car wheels animation update
+
+        for (int32_t i = 0; i < wheels_scene_obj_comps.size(); ++i)
+        {
+            std::shared_ptr<SceneObjectComp> scene_obj_comp = wheels_scene_obj_comps[i];
+            std::shared_ptr<TransformComp> wheel_transform_comp = wheels_transform_comps[i];
+            glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
+            float radius = center.y * zr1_car_entity.root->scale.x;
+            wheel_transform_comp->rotation.x += glm::degrees((car_speed / radius) * float(delta_time));
         }
 
         // Aqui executamos as operações de renderização
@@ -499,8 +535,6 @@ int main(int argc, char* argv[])
             projection = Matrix_Orthographic(l, r, b, t, nearplane, farplane);
         }
 
-        glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
-
         // Enviamos as matrizes "view" e "projection" para a placa de vídeo
         // (GPU). Veja o arquivo "shader_vertex.glsl", onde estas são
         // efetivamente aplicadas em todos os pontos.
@@ -508,155 +542,10 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
 
         // Desenhamos a pista
-        model = Matrix_Scale(0.5, 0.5, 0.5);
-        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-        glActiveTexture(GL_TEXTURE0);
-        glUniform1i(g_has_kd_texture_uniform, true);
-        glUniform1i(g_has_ke_texture_uniform, false);
-        glUniform1i(g_has_opacity_texture_uniform, false);
-        glUniform3f(g_kd_uniform, 1, 1, 1);
-        glUniform3f(g_ks_uniform, 0, 0, 0);
-        glUniform3f(g_ke_uniform, 0, 0, 0);
-        glUniform1f(g_ns_uniform, 0);
-        glUniform1f(g_opacity_uniform, 1);
-        glBindTexture(GL_TEXTURE_2D, curve_model.textures_ids.find(0)->second.diffuse_id);
-        DrawVirtualObject(curve_model.shapes[0].name.c_str());
+		DrawEntity(&curve_entity);
 
-        auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
-        if (car_forward.x < 0)
-            theta = glm::degrees(glm::two_pi<float>()) - theta;
-
-        auto phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
-        if (car_forward.z > 0)
-            phi = glm::degrees(glm::two_pi<float>()) - phi;
-
-        glm::vec3 car_world_rotation = { phi, theta, 0 };
-        glm::vec3 car_world_pos = model * glm::vec4(cur_curve_pos, 1.0f);
-
-        auto draw_shape = [&](const tinyobj::shape_t& shape)
-        {
-            constexpr float car_scale = 0.5;
-            glm::mat4 wheel_rotation = Matrix_Identity();
-            if (shape.name.find("Wheel.") != std::string::npos)
-            {
-			    glm::vec3 center = (g_VirtualScene[shape.name].bbox_min + g_VirtualScene[shape.name].bbox_max) / 2.0f;
-                float radius = center.y * car_scale;
-                wheels_rotation_angles[shape.name] += (car_speed / radius) * float(delta_time);
-
-				wheel_rotation = Matrix_Translate(center.x, center.y, center.z)
-                    * Matrix_Rotate_X(wheels_rotation_angles[shape.name])
-                    * Matrix_Translate(-center.x, -center.y, -center.z);
-            }
-
-            model = Matrix_Translate(car_world_pos.x, car_world_pos.y, car_world_pos.z)
-                * Matrix_Rotate_X(glm::radians(car_world_rotation.x))
-                * Matrix_Rotate_Y(glm::radians(car_world_rotation.y))
-                * Matrix_Rotate_Z(glm::radians(car_world_rotation.z))
-                * Matrix_Scale(car_scale, car_scale, car_scale)
-                * wheel_rotation;
-
-            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-
-            glActiveTexture(GL_TEXTURE0);
-            int material_idx = shape.mesh.material_ids[0];
-			const auto& textures_ids_it = car_zr1_model.textures_ids.find(material_idx);
-			bool has_any_texture = (textures_ids_it != car_zr1_model.textures_ids.end());
-            if (has_any_texture && textures_ids_it->second.diffuse_id != max_int32)
-            {
-                glUniform1i(g_has_kd_texture_uniform, true);
-
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.diffuse_id);
-            }
-            else
-            {
-                glUniform1i(g_has_kd_texture_uniform, false);
-
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, 0);
-            }
-            if (has_any_texture && textures_ids_it->second.emissive_id != max_int32)
-            {
-                glUniform1i(g_has_ke_texture_uniform, true);
-
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.emissive_id);
-            }
-            else
-            {
-                glUniform1i(g_has_ke_texture_uniform, false);
-
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, 0);
-            }
-            if (has_any_texture && textures_ids_it->second.opacity_id != max_int32)
-            {
-                glUniform1i(g_has_opacity_texture_uniform, true);
-
-                glActiveTexture(GL_TEXTURE2);
-                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.opacity_id);
-            }
-            else
-            {
-                glUniform1i(g_has_opacity_texture_uniform, false);
-
-                glActiveTexture(GL_TEXTURE2);
-                glBindTexture(GL_TEXTURE_2D, 0);
-            }
-
-            const auto& mat = car_zr1_model.materials[material_idx];
-            glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
-            glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
-            glUniform3f(g_ke_uniform, mat.emission[0], mat.emission[1], mat.emission[2]);
-            glUniform1f(g_ns_uniform, mat.shininess);
-            glUniform1f(g_opacity_uniform, mat.dissolve);
-
-            DrawVirtualObject(shape.name.c_str());
-        };
-
-		//std::map<float, const tinyobj::shape_t*> transparent_shapes;
-		std::vector<const tinyobj::shape_t*> transparent_shapes;
-
-        // OPAQUE PASS
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
-
-        // Desenhamos o modelo do carro ZR1
-        for(const auto& shape : car_zr1_model.shapes)
-        {
-            int material_idx = shape.mesh.material_ids[0];
-            const auto& mat = car_zr1_model.materials[material_idx];
-            const auto& textures_ids_it = car_zr1_model.textures_ids.find(material_idx);
-            bool is_transparent = (mat.dissolve < 0.999f) || 
-                (textures_ids_it != car_zr1_model.textures_ids.end() && textures_ids_it->second.opacity_id != max_int32);
-            if(is_transparent)
-            {
-				transparent_shapes.push_back(&shape);
-            }
-            else
-            {
-                draw_shape(shape);
-            }
-        }
-
-        // TRANSPARENT PASS
-        glEnable(GL_BLEND);
-        glDepthMask(GL_FALSE);
-
-        for (const auto& shape : transparent_shapes)
-        {
-			draw_shape(*shape);
-        }
-
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0); // unbind
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, 0); // unbind
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, 0); // unbind
+        // Desenhamos o carro
+        DrawEntity(&zr1_car_entity);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -746,12 +635,12 @@ void DrawVirtualObject(const char* object_name)
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
     // comentários detalhados dentro da definição de BuildTrianglesAndAddToVirtualScene().
-    glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
+    glBindVertexArray(g_virtual_scene[object_name]->vertex_array_object_id);
 
     // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
     // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
-    glm::vec3 bbox_min = g_VirtualScene[object_name].bbox_min;
-    glm::vec3 bbox_max = g_VirtualScene[object_name].bbox_max;
+    glm::vec3 bbox_min = g_virtual_scene[object_name]->bbox_min;
+    glm::vec3 bbox_max = g_virtual_scene[object_name]->bbox_max;
     glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
 
@@ -761,10 +650,10 @@ void DrawVirtualObject(const char* object_name)
     // a documentação da função glDrawElements() em
     // http://docs.gl/gl3/glDrawElements.
     glDrawElements(
-        g_VirtualScene[object_name].rendering_mode,
-        g_VirtualScene[object_name].num_indices,
+        g_virtual_scene[object_name]->rendering_mode,
+        g_virtual_scene[object_name]->num_indices,
         GL_UNSIGNED_INT,
-        (void*)(g_VirtualScene[object_name].first_index * sizeof(GLuint))
+        (void*)(g_virtual_scene[object_name]->first_index * sizeof(GLuint))
     );
 
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
@@ -835,25 +724,25 @@ void LoadShadersFromFiles()
     glUseProgram(0);
 }
 
-// Função que pega a matriz M e guarda a mesma no topo da pilha
-void PushMatrix(glm::mat4 M)
-{
-    g_MatrixStack.push(M);
-}
-
-// Função que remove a matriz atualmente no topo da pilha e armazena a mesma na variável M
-void PopMatrix(glm::mat4& M)
-{
-    if ( g_MatrixStack.empty() )
-    {
-        M = Matrix_Identity();
-    }
-    else
-    {
-        M = g_MatrixStack.top();
-        g_MatrixStack.pop();
-    }
-}
+//// Função que pega a matriz M e guarda a mesma no topo da pilha
+//void PushMatrix(glm::mat4 M)
+//{
+//    g_MatrixStack.push(M);
+//}
+//
+//// Função que remove a matriz atualmente no topo da pilha e armazena a mesma na variável M
+//void PopMatrix(glm::mat4& M)
+//{
+//    if ( g_MatrixStack.empty() )
+//    {
+//        M = Matrix_Identity();
+//    }
+//    else
+//    {
+//        M = g_MatrixStack.top();
+//        g_MatrixStack.pop();
+//    }
+//}
 
 // Função que computa as normais de um ObjModel, caso elas não tenham sido
 // especificadas dentro do arquivo ".obj"
@@ -1132,17 +1021,20 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
 
         size_t last_index = indices.size() - 1;
 
-        SceneObject theobject;
-        theobject.name           = model->shapes[shape].name;
-        theobject.first_index    = first_index; // Primeiro índice
-        theobject.num_indices    = last_index - first_index + 1; // Número de indices
-        theobject.rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        theobject.vertex_array_object_id = vertex_array_object_id;
+        std::shared_ptr<SceneObjectComp> theobject = std::make_shared<SceneObjectComp>();
+        theobject->object_name = model->shapes[shape].name;
+        theobject->first_index    = first_index; // Primeiro índice
+        theobject->num_indices    = last_index - first_index + 1; // Número de indices
+        theobject->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
+        theobject->vertex_array_object_id = vertex_array_object_id;
 
-        theobject.bbox_min = bbox_min;
-        theobject.bbox_max = bbox_max;
+        theobject->bbox_min = bbox_min;
+        theobject->bbox_max = bbox_max;
 
-        g_VirtualScene[model->shapes[shape].name] = theobject;
+        theobject->model = model;
+        theobject->submesh_index = shape;
+
+        g_virtual_scene[model->shapes[shape].name] = theobject;
     }
 
     GLuint VBO_model_coefficients_id;
@@ -1384,13 +1276,13 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_LeftMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
         //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_LeftMouseButtonPressed = true;
+        g_left_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_LeftMouseButtonPressed = false;
+        g_left_mouse_button_pressed = false;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
     {
@@ -1400,13 +1292,13 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_RightMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
         //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_RightMouseButtonPressed = true;
+        g_right_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_RightMouseButtonPressed = false;
+        g_right_mouse_button_pressed = false;
     }
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS)
     {
@@ -1416,13 +1308,13 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_MiddleMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
         //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_MiddleMouseButtonPressed = true;
+        g_middle_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_MiddleMouseButtonPressed = false;
+        g_middle_mouse_button_pressed = false;
     }
 }
 
@@ -1436,22 +1328,22 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     // parâmetros que definem a posição da câmera dentro da cena virtual.
     // Assim, temos que o usuário consegue controlar a câmera.
 
-    if (g_LeftMouseButtonPressed)
+    if (g_left_mouse_button_pressed)
     {
-        mouse_cursor_delta_x += last_mouse_cursor_x - xpos;
-        mouse_cursor_delta_y += last_mouse_cursor_y - ypos;
+        g_mouse_cursor_delta_x += g_last_mouse_cursor_x - xpos;
+        g_mouse_cursor_delta_y += g_last_mouse_cursor_y - ypos;
     }
 
-    if (g_RightMouseButtonPressed)
-    {
-    }
-
-    if (g_MiddleMouseButtonPressed)
+    if (g_right_mouse_button_pressed)
     {
     }
 
-    last_mouse_cursor_x = xpos;
-    last_mouse_cursor_y = ypos;
+    if (g_middle_mouse_button_pressed)
+    {
+    }
+
+    g_last_mouse_cursor_x = xpos;
+    g_last_mouse_cursor_y = ypos;
 }
 
 // Função callback chamada sempre que o usuário movimenta a "rodinha" do mouse.
@@ -1538,7 +1430,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
     // Se o usuário apertar a tecla H, fazemos um "toggle" do texto informativo mostrado na tela.
     if (key == GLFW_KEY_H && action == GLFW_PRESS)
     {
-        g_ShowInfoText = !g_ShowInfoText;
+        g_show_info_text = !g_show_info_text;
     }
 
     // Se o usuário apertar a tecla R, recarregamos os shaders dos arquivos "shader_fragment.glsl" e "shader_vertex.glsl".
@@ -1575,7 +1467,7 @@ void TextRendering_ShowModelViewProjection(
     glm::vec4 p_model
 )
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     glm::vec4 p_world = model*p_model;
@@ -1629,7 +1521,7 @@ void TextRendering_ShowModelViewProjection(
 // g_AngleX, g_AngleY, e g_AngleZ.
 void TextRendering_ShowEulerAngles(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     float pad = TextRendering_LineHeight(window);
@@ -1643,7 +1535,7 @@ void TextRendering_ShowEulerAngles(GLFWwindow* window)
 // Escrevemos na tela qual matriz de projeção está sendo utilizada.
 void TextRendering_ShowProjection(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     float lineheight = TextRendering_LineHeight(window);
@@ -1659,7 +1551,7 @@ void TextRendering_ShowProjection(GLFWwindow* window)
 // second).
 void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     // Variáveis estáticas (static) mantém seus valores entre chamadas
@@ -1865,6 +1757,7 @@ void PrintObjModelInfo(ObjModel* model)
 
 ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
 {
+	this->filepath = filepath;
     printf("Carregando objetos do arquivo \"%s\"...\n", filepath);
 
     // Se basepath == NULL, então setamos basepath como o dirname do
@@ -1943,4 +1836,164 @@ ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
 
         material_index++;
     }
+}
+
+void DrawEntity(const Entity* entity)
+{
+    const std::vector<std::shared_ptr<SceneObjectComp>>& scene_obj_components = g_entities_scene_objs[entity->GetId()];
+
+    if (scene_obj_components.empty()) return;
+
+    auto draw_shape = [&](std::shared_ptr<SceneObjectComp> scene_obj_comp)
+        {
+            ObjModel* model_to_draw = scene_obj_comp->model;
+            const tinyobj::shape_t& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+
+            glm::mat4 local_comp_transform_mat = Matrix_Identity();
+
+			auto transform_components = scene_obj_comp->GetComponentsByType<TransformComp>();
+
+            if (!transform_components.empty())
+            {
+                glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
+                std::shared_ptr<TransformComp> transform_component = transform_components[0];
+                local_comp_transform_mat = Matrix_Translate(center.x, center.y, center.z)
+                    * Matrix_Translate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
+                    * Matrix_Rotate_X(glm::radians(transform_component->rotation.x))
+                    * Matrix_Rotate_Y(glm::radians(transform_component->rotation.y))
+                    * Matrix_Rotate_Z(glm::radians(transform_component->rotation.z))
+					* Matrix_Scale(transform_component->scale.x, transform_component->scale.y, transform_component->scale.z)
+                    * Matrix_Translate(-center.x, -center.y, -center.z);
+            }
+
+            glm::mat4 model = Matrix_Translate(entity->root->position.x, entity->root->position.y, entity->root->position.z)
+                * Matrix_Rotate_X(glm::radians(entity->root->rotation.x))
+                * Matrix_Rotate_Y(glm::radians(entity->root->rotation.y))
+                * Matrix_Rotate_Z(glm::radians(entity->root->rotation.z))
+                * Matrix_Scale(entity->root->scale.x, entity->root->scale.y, entity->root->scale.z)
+                * local_comp_transform_mat;
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+
+            glActiveTexture(GL_TEXTURE0);
+            int material_idx = shape.mesh.material_ids[0];
+            const auto& textures_ids_it = model_to_draw->textures_ids.find(material_idx);
+            bool has_any_texture = (textures_ids_it != model_to_draw->textures_ids.end());
+            if (has_any_texture && textures_ids_it->second.diffuse_id != max_int32)
+            {
+                glUniform1i(g_has_kd_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.diffuse_id);
+            }
+            else
+            {
+                glUniform1i(g_has_kd_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (has_any_texture && textures_ids_it->second.emissive_id != max_int32)
+            {
+                glUniform1i(g_has_ke_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.emissive_id);
+            }
+            else
+            {
+                glUniform1i(g_has_ke_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (has_any_texture && textures_ids_it->second.opacity_id != max_int32)
+            {
+                glUniform1i(g_has_opacity_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.opacity_id);
+            }
+            else
+            {
+                glUniform1i(g_has_opacity_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+
+            const auto& mat = model_to_draw->materials[material_idx];
+            glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
+            glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
+            glUniform3f(g_ke_uniform, mat.emission[0], mat.emission[1], mat.emission[2]);
+            glUniform1f(g_ns_uniform, mat.shininess);
+            glUniform1f(g_opacity_uniform, mat.dissolve);
+
+            DrawVirtualObject(shape.name.c_str());
+        };
+
+    //std::map<float, const tinyobj::shape_t*> transparent_shapes;
+    std::vector<std::shared_ptr<SceneObjectComp>> transparent_objects;
+
+    // OPAQUE PASS
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+
+    for (const auto& scene_obj_comp : scene_obj_components)
+    {
+		ObjModel* model_to_draw = scene_obj_comp->model;
+		const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+
+        int material_idx = shape.mesh.material_ids[0];
+        const auto& mat = model_to_draw->materials[material_idx];
+        const auto& textures_ids_it = model_to_draw->textures_ids.find(material_idx);
+        bool is_transparent = (mat.dissolve < 0.999f) ||
+            (textures_ids_it != model_to_draw->textures_ids.end() && textures_ids_it->second.opacity_id != max_int32);
+        if (is_transparent)
+        {
+            transparent_objects.push_back(scene_obj_comp);
+        }
+        else
+        {
+            draw_shape(scene_obj_comp);
+        }
+    }
+
+    // TRANSPARENT PASS
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    for (const auto& scene_obj_comp : scene_obj_components)
+    {
+        ObjModel* model_to_draw = scene_obj_comp->model;
+        const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+
+        draw_shape(scene_obj_comp);
+    }
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+}
+
+std::vector<std::shared_ptr<Component>> GetSceneObjectsByModelName(const std::string& model_name)
+{
+	std::vector<std::shared_ptr<Component>> result;
+
+    auto it = g_loaded_models.find(model_name);
+
+	if (it == g_loaded_models.end()) return result;
+
+    for(const auto& shape : it->second.shapes)
+    {
+		result.push_back(g_virtual_scene[shape.name]);
+	}
+
+    return result;
 }
