@@ -303,9 +303,14 @@ int main(int argc, char* argv[])
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
     // Construímos a representação de objetos geométricos através de malhas de triângulos
-    ObjModel spheremodel("../../data/sphere.obj");
-    ComputeNormals(&spheremodel);
-    BuildTrianglesAndAddToVirtualScene(&spheremodel);
+    //ObjModel spheremodel("../../data/sphere.obj");
+    //ComputeNormals(&spheremodel);
+    //BuildTrianglesAndAddToVirtualScene(&spheremodel);
+
+    ObjModel carmodel("../../data/Porsche_911_GT2.obj");
+    ComputeNormals(&carmodel);
+    BuildTrianglesAndAddToVirtualScene(&carmodel);
+
 
     ObjModel bunnymodel("../../data/bunny.obj");
     ComputeNormals(&bunnymodel);
