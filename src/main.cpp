@@ -143,18 +143,20 @@ struct Car
     std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps;
     int32_t cur_curve_point;
     glm::vec3 cur_curve_pos;
+    int32_t cur_lane;
 };
 
 struct Track
 {
     std::shared_ptr<Entity> entity;
-	std::vector<glm::vec3> points;
+	std::vector<std::vector<glm::vec3>> lanes;
 };
 
 // New user functions declarations
 void DrawEntity(const std::shared_ptr<Entity> entity);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
 void UpdateCarEntity(double delta_time, Car* car, Track* track);
+std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -325,14 +327,14 @@ int main(int argc, char* argv[])
     std::shared_ptr<Entity> curve_entity = std::make_shared<Entity>("track");
     curve_entity->AddComponents(CreateSceneObjectComponentsForModelByName(curve_model->filepath));
     g_entities_virtual_scene_objs.emplace(curve_entity->GetId(), curve_entity->GetComponentsByType<SceneObjectComp>());
-	curve_entity->root->scale = { 0.5f, 0.5f, 0.5f };
+	curve_entity->root->scale = { 0.25f, 0.25f, 0.25f };
 
     std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
 
 	Track track
     {
 		.entity = curve_entity,
-		.points = curve_points
+		.lanes = SplitCurvePathInLanes(curve_points, 2)
 	};
 
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
@@ -344,7 +346,7 @@ int main(int argc, char* argv[])
     std::shared_ptr<Entity> zr1_car_entity_0 = std::make_shared<Entity>("ZR1_car_0");
 	zr1_car_entity_0->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
     g_entities_virtual_scene_objs.emplace(zr1_car_entity_0->GetId(), zr1_car_entity_0->GetComponentsByType<SceneObjectComp>());
-	zr1_car_entity_0->root->scale = { 0.5f, 0.5f, 0.5f };
+	zr1_car_entity_0->root->scale = { 0.25f, 0.25f, 0.25f };
 
     Car zr1_car0
     {
@@ -354,7 +356,8 @@ int main(int argc, char* argv[])
         .wheels_scene_obj_comps = {},
         .wheels_transform_comps = {},
         .cur_curve_point = 0,
-        .cur_curve_pos = track.points.front()
+        .cur_curve_pos = track.lanes[0].front(),
+        .cur_lane = 0
     };
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0.entity->GetComponentsByType<SceneObjectComp>())
@@ -369,7 +372,7 @@ int main(int argc, char* argv[])
     std::shared_ptr<Entity> zr1_car_entity_1 = std::make_shared<Entity>("ZR1_car_1");
     zr1_car_entity_1->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
     g_entities_virtual_scene_objs.emplace(zr1_car_entity_1->GetId(), zr1_car_entity_1->GetComponentsByType<SceneObjectComp>());
-    zr1_car_entity_1->root->scale = { 0.5f, 0.5f, 0.5f };
+    zr1_car_entity_1->root->scale = { 0.25f, 0.25f, 0.25f };
 
     Car zr1_car1
     {
@@ -379,7 +382,8 @@ int main(int argc, char* argv[])
         .wheels_scene_obj_comps = {},
         .wheels_transform_comps = {},
         .cur_curve_point = 0,
-		.cur_curve_pos = track.points.front()
+        .cur_curve_pos = track.lanes[1].front(),
+        .cur_lane = 1
     };
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1.entity->GetComponentsByType<SceneObjectComp>())
@@ -1997,24 +2001,26 @@ void UpdateCarEntity(double delta_time, Car* car, Track* track)
 
     car->speed = std::clamp(car->speed, 0.0f, max_car_speed);
 
+    const auto& track_points = track->lanes[car->cur_lane];
+
     // Car animation path update
-    int32_t next_point = (car->cur_curve_point + 1) % track->points.size();
+    int32_t next_point = (car->cur_curve_point + 1) % track_points.size();
     glm::vec3 car_forward(0.0f);
     while (true)
     {
-        car_forward = glm::normalize(track->points[next_point] - track->points[car->cur_curve_point]);
+        car_forward = glm::normalize(track_points[next_point] - track_points[car->cur_curve_point]);
         glm::vec3 new_curve_pos = car->cur_curve_pos + car->speed * (float)delta_time * car_forward;
 
-        if (glm::dot(car_forward, track->points[next_point] - new_curve_pos) < 0)
+        if (glm::dot(car_forward, track_points[next_point] - new_curve_pos) < 0)
         {
-            next_point = (next_point + 1) % track->points.size();
+            next_point = (next_point + 1) % track_points.size();
             new_curve_pos = car->cur_curve_pos;
         }
         else
         {
             car->cur_curve_pos = new_curve_pos;
             car->cur_curve_point = next_point - 1;
-            if (car->cur_curve_point < 0 || car->cur_curve_point >= track->points.size()) 
+            if (car->cur_curve_point < 0 || car->cur_curve_point >= track_points.size())
                 car->cur_curve_point = 0;
             break;
         }
@@ -2046,4 +2052,41 @@ void UpdateCarEntity(double delta_time, Car* car, Track* track)
         float radius = center.y * car->entity->root->scale.x;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
     }
+}
+
+std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes)
+{
+    std::vector<std::vector<glm::vec3>> lanes;
+
+    lanes.resize(num_lanes);
+
+    constexpr float lane_width = 3.0f;
+    const float track_width = (num_lanes - 1) * lane_width;
+
+    for (int32_t l = 0; l < num_lanes; ++l)
+    {
+        lanes[l].reserve(points.size());
+
+        float lane_width_coord = l * (track_width / (num_lanes - 1)) - (track_width / 2);
+
+        for (int32_t p = 0; p < points.size() - 1; ++p)
+        {
+            const glm::vec3& point = points[p];
+            const glm::vec3& next_point = points[p + 1];
+
+            glm::vec3 forward = glm::normalize(next_point - point);
+            glm::vec3 right = glm::cross(glm::vec3(0, 1, 0), forward);
+            glm::vec3 offset = right * lane_width_coord;
+            lanes[l].push_back(point + offset);
+        }
+        const glm::vec3& point = points[points.size() - 1];
+        const glm::vec3& next_point = points[0];
+
+        glm::vec3 forward = glm::normalize(next_point - point);
+        glm::vec3 right = glm::cross(glm::vec3(0, 1, 0), forward);
+        glm::vec3 offset = right * lane_width_coord;
+        lanes[l].push_back(point + offset);
+    }
+
+    return lanes;
 }
