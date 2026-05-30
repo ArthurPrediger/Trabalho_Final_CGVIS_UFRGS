@@ -133,10 +133,13 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
-// New user structs
-struct Car
+// New user classes definitions
+class Car : public Entity
 {
-	std::shared_ptr<Entity> entity;
+public:
+	Car(const std::string& name = "") : Entity(name) {};
+
+public:
 	float speed;
 	std::array<int32_t, 2> input_keys;
     std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps;
@@ -144,21 +147,29 @@ struct Car
     int32_t cur_curve_point;
     glm::vec3 cur_curve_pos;
     int32_t cur_lane;
+	bool is_accelerating = false;
+	bool is_destabilized = false;
+    float yaw_tremble_timer = 0.0f;
+	float destabilization_timer = 0.0f;
 };
 
-struct Track
+class Track : public Entity
 {
-    std::shared_ptr<Entity> entity;
+public:
+    Track(const std::string& name = "") : Entity(name) {};
+public:
 	std::vector<std::vector<glm::vec3>> lanes;
-	std::vector<float> lane_lengths;
+	std::vector<float> normalized_lane_lengths;
 };
 
 // New user functions declarations
 void DrawEntity(const std::shared_ptr<Entity> entity);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
-void UpdateCarEntity(double delta_time, Car* car, Track* track);
+void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
-std::vector<float> CalculateLaneLengthsNormalized(const std::vector<std::vector<glm::vec3>>& lanes);
+std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
+float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2);
+float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, const std::shared_ptr<Track>& track);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -326,19 +337,15 @@ int main(int argc, char* argv[])
     BuildTrianglesAndBuffers(curve_model);
 	g_loaded_models.emplace(curve_model->filepath, curve_model);
 
-    std::shared_ptr<Entity> curve_entity = std::make_shared<Entity>("track");
-    curve_entity->AddComponents(CreateSceneObjectComponentsForModelByName(curve_model->filepath));
-    g_entities_virtual_scene_objs.emplace(curve_entity->GetId(), curve_entity->GetComponentsByType<SceneObjectComp>());
-	curve_entity->root->scale = { 0.25f, 0.25f, 0.25f };
+    std::shared_ptr<Track> track = std::make_shared<Track>("track");
+    track->AddComponents(CreateSceneObjectComponentsForModelByName(curve_model->filepath));
+    g_entities_virtual_scene_objs.emplace(track->GetId(), track->GetComponentsByType<SceneObjectComp>());
+    track->root->scale = { 0.25f, 0.25f, 0.25f };
 
     std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
 
-	Track track
-    {
-		.entity = curve_entity,
-		.lanes = SplitCurvePathInLanes(curve_points, 2),
-		.lane_lengths = CalculateLaneLengthsNormalized(track.lanes)
-	};
+    track->lanes = SplitCurvePathInLanes(curve_points, 2),
+        track->normalized_lane_lengths = CalculateNormalizedLaneLengths(track->lanes);
 
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
     ComputeNormals(car_zr1_model);
@@ -346,55 +353,47 @@ int main(int argc, char* argv[])
     BuildTrianglesAndBuffers(car_zr1_model);
     g_loaded_models.emplace(car_zr1_model->filepath, car_zr1_model);
 
-    std::shared_ptr<Entity> zr1_car_entity_0 = std::make_shared<Entity>("ZR1_car_0");
-	zr1_car_entity_0->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
-    g_entities_virtual_scene_objs.emplace(zr1_car_entity_0->GetId(), zr1_car_entity_0->GetComponentsByType<SceneObjectComp>());
-	zr1_car_entity_0->root->scale = { 0.25f, 0.25f, 0.25f };
+    std::shared_ptr<Car> zr1_car0 = std::make_shared<Car>("ZR1_car_0");
+    zr1_car0->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
+    g_entities_virtual_scene_objs.emplace(zr1_car0->GetId(), zr1_car0->GetComponentsByType<SceneObjectComp>());
+    zr1_car0->root->scale = { 0.25f, 0.25f, 0.25f };
 
-    Car zr1_car0
-    {
-        .entity = zr1_car_entity_0,
-        .speed = 0.0f,
-        .input_keys = { GLFW_KEY_Z, GLFW_KEY_C },
-        .wheels_scene_obj_comps = {},
-        .wheels_transform_comps = {},
-        .cur_curve_point = 0,
-        .cur_curve_pos = track.lanes[0].front(),
-        .cur_lane = 0
-    };
+    zr1_car0->speed = 0.0f;
+    zr1_car0->input_keys = { GLFW_KEY_Z, GLFW_KEY_C };
+    zr1_car0->wheels_scene_obj_comps = {};
+    zr1_car0->wheels_transform_comps = {};
+    zr1_car0->cur_curve_point = 0;
+    zr1_car0->cur_curve_pos = track->lanes[0].front();
+    zr1_car0->cur_lane = 0;
 
-    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0.entity->GetComponentsByType<SceneObjectComp>())
+    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0->GetComponentsByType<SceneObjectComp>())
     {
         if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
         {
-            zr1_car0.wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            zr1_car0.wheels_scene_obj_comps.push_back(scene_obj_comp);
+            zr1_car0->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            zr1_car0->wheels_scene_obj_comps.push_back(scene_obj_comp);
         }
     }
 
-    std::shared_ptr<Entity> zr1_car_entity_1 = std::make_shared<Entity>("ZR1_car_1");
-    zr1_car_entity_1->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
-    g_entities_virtual_scene_objs.emplace(zr1_car_entity_1->GetId(), zr1_car_entity_1->GetComponentsByType<SceneObjectComp>());
-    zr1_car_entity_1->root->scale = { 0.25f, 0.25f, 0.25f };
+    std::shared_ptr<Car> zr1_car1 = std::make_shared<Car>("ZR1_car_1");
+    zr1_car1->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
+    g_entities_virtual_scene_objs.emplace(zr1_car1->GetId(), zr1_car1->GetComponentsByType<SceneObjectComp>());
+    zr1_car1->root->scale = { 0.25f, 0.25f, 0.25f };
 
-    Car zr1_car1
-    {
-        .entity = zr1_car_entity_1,
-        .speed = 0.0f,
-        .input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN },
-        .wheels_scene_obj_comps = {},
-        .wheels_transform_comps = {},
-        .cur_curve_point = 0,
-        .cur_curve_pos = track.lanes[1].front(),
-        .cur_lane = 1
-    };
+    zr1_car1->speed = 0.0f;
+    zr1_car1->input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN };
+    zr1_car1->wheels_scene_obj_comps = {};
+    zr1_car1->wheels_transform_comps = {};
+    zr1_car1->cur_curve_point = 0;
+    zr1_car1->cur_curve_pos = track->lanes[1].front();
+    zr1_car1->cur_lane = 1;;
 
-    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1.entity->GetComponentsByType<SceneObjectComp>())
+    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1->GetComponentsByType<SceneObjectComp>())
     {
         if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
         {
-            zr1_car1.wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            zr1_car1.wheels_scene_obj_comps.push_back(scene_obj_comp);
+            zr1_car1->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            zr1_car1->wheels_scene_obj_comps.push_back(scene_obj_comp);
         }
     }
 
@@ -457,8 +456,8 @@ int main(int argc, char* argv[])
         }
 
         // Cars movement and animation updates based on user input
-		UpdateCarEntity(delta_time, &zr1_car0, &track);
-		UpdateCarEntity(delta_time, &zr1_car1, &track);
+		UpdateCarEntity(delta_time, zr1_car0, track);
+        UpdateCarEntity(delta_time, zr1_car1, track);
 
         // Aqui executamos as operações de renderização
 
@@ -540,13 +539,13 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
 
         // Desenhamos a pista
-		DrawEntity(curve_entity);
+		DrawEntity(track);
 
         // Desenhamos o carro
-        DrawEntity(zr1_car_entity_0);
+        DrawEntity(zr1_car0);
 
         // Desenhamos o carro
-        DrawEntity(zr1_car_entity_1);
+        DrawEntity(zr1_car1);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -1985,22 +1984,25 @@ std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForMode
     return result;
 }
 
-void UpdateCarEntity(double delta_time, Car* car, Track* track)
+void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
 {
     static constexpr float max_car_speed = 64.0f;
     static constexpr float car_acceleration = 16.0f;
     static constexpr float asphalt_friction = 0.7f;
 
-    if (keys[car->input_keys.at(0)])
+    car->is_accelerating = false;
+    if (keys[car->input_keys.at(0)] && !car->is_destabilized)
     {
-        car->speed += car_acceleration * track->lane_lengths[car->cur_lane] * float(delta_time);
+        car->speed += car_acceleration * track->normalized_lane_lengths[car->cur_lane] * float(delta_time);
+        car->is_accelerating = true;
     }
-    else if (keys[car->input_keys.at(1)])
+    else if (keys[car->input_keys.at(1)] && !car->is_destabilized)
     {
-        car->speed -= car_acceleration * track->lane_lengths[car->cur_lane] * float(delta_time);
+        car->speed -= car_acceleration * track->normalized_lane_lengths[car->cur_lane] * float(delta_time);
     }
 
-    car->speed *= powf(asphalt_friction, float(delta_time));
+	float destabilization_factor = car->is_destabilized ? 0.35f : 0.0f;
+    car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
 
     car->speed = std::clamp(car->speed, 0.0f, max_car_speed);
 
@@ -2029,32 +2031,87 @@ void UpdateCarEntity(double delta_time, Car* car, Track* track)
         }
     }
 
-    auto theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
+    float theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
     if (car_forward.x < 0)
         theta = glm::degrees(glm::two_pi<float>()) - theta;
 
-    auto phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
+    float phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
     if (car_forward.z > 0)
         phi = glm::degrees(glm::two_pi<float>()) - phi;
 
+    glm::vec3 world_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 car_right = glm::normalize(glm::cross(world_up, car_forward));
+    glm::vec3 car_up =glm::normalize(glm::cross(car_forward, car_right));
+    float roll = glm::degrees(atan2(glm::dot(car_right, world_up), glm::dot(car_up, world_up)));
+
+    glm::vec3 car_world_rotation = { phi, theta, roll };
+
     glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
-    model *= Matrix_Scale(track->entity->root->scale.x, track->entity->root->scale.y, track->entity->root->scale.z);
-    glm::vec3 car_world_rotation = { phi, theta, 0 };
+    model *= Matrix_Scale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
     glm::vec3 car_world_pos = model * glm::vec4(car->cur_curve_pos, 1.0f);
 
-    car->entity->root->position = car_world_pos;
-    car->entity->root->rotation = car_world_rotation;
+    car->root->position = car_world_pos;
+    car->root->rotation = car_world_rotation;
 
     // Car wheels animation update
-
     for (int32_t i = 0; i < car->wheels_scene_obj_comps.size(); ++i)
     {
         std::shared_ptr<SceneObjectComp> scene_obj_comp = car->wheels_scene_obj_comps[i];
         std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
-        glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
-        float radius = center.y * car->entity->root->scale.x;
+        float radius = (scene_obj_comp->bbox_max.y - scene_obj_comp->bbox_min.y) * 0.5f * car->root->scale.y;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
     }
+
+	// Car destabilization update
+    float car0_ratio = ComputeCarSpeedRelativeToTrackCurvature(car, track);
+
+    static constexpr float warning_threshold = 0.6f;
+    static constexpr float skid_threshold = 1.10f;
+    car->yaw_tremble_timer += delta_time;
+
+    float yaw_offset = 0.0f;
+
+    if (!car->is_destabilized)
+    {
+        if (car0_ratio > warning_threshold && car0_ratio <= skid_threshold)
+        {
+            float t = ((car0_ratio - warning_threshold) / (skid_threshold - warning_threshold)) + 0.25f;
+
+            t = glm::clamp(t, 0.0f, 1.0f);
+
+            // stronger near the limit
+            //t = t * t;
+
+            static constexpr float max_warning_tremble = 12.0f;
+            static constexpr float warning_frequency = 16.0f;
+
+            yaw_offset = max_warning_tremble * t * sinf(car->yaw_tremble_timer * warning_frequency);
+        }
+        else if (car0_ratio > skid_threshold && car->is_accelerating)
+        {
+            car->is_accelerating = false;
+            car->is_destabilized = true;
+            car->destabilization_timer = 0.0f;
+        }
+    }
+    else
+    {
+        static constexpr float skid_tremble = 16.0f;
+        static constexpr float skid_frequency = 25.0f;
+
+        yaw_offset = skid_tremble * sinf(car->yaw_tremble_timer * skid_frequency);
+
+        car->destabilization_timer += delta_time;
+
+        static constexpr float destabilization_duration = 2.0f;
+        if (car->destabilization_timer >= destabilization_duration)
+        {
+            car->is_destabilized = false;
+            car->destabilization_timer = 0.0f;
+        }
+    }
+
+    car->root->rotation.y += yaw_offset;
 }
 
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes)
@@ -2094,10 +2151,10 @@ std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm:
     return lanes;
 }
 
-std::vector<float> CalculateLaneLengthsNormalized(const std::vector<std::vector<glm::vec3>>& lanes)
+std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
 {
-	std::vector<float> lane_lengths_normalized;
-	lane_lengths_normalized.reserve(lanes.size());
+	std::vector<float> normalized_lane_lengths;
+	normalized_lane_lengths.reserve(lanes.size());
 
     for(const auto& lane : lanes)
     {
@@ -2107,14 +2164,53 @@ std::vector<float> CalculateLaneLengthsNormalized(const std::vector<std::vector<
             lane_length += glm::distance(lane[p], lane[p + 1]);
         }
         lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
-        lane_lengths_normalized.push_back(lane_length);
+        normalized_lane_lengths.push_back(lane_length);
 	}
 
-	const float max_lane_length = lane_lengths_normalized[0];
-    for(float& lane_length : lane_lengths_normalized)
+	const float max_lane_length = normalized_lane_lengths[0];
+    for(float& lane_length : normalized_lane_lengths)
     {
         lane_length /= max_lane_length;
 	}
 
-    return lane_lengths_normalized;
+    return normalized_lane_lengths;
+}
+
+float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2)
+{
+    float a = glm::length(p1 - p0);
+    float b = glm::length(p2 - p1);
+    float c = glm::length(p2 - p0);
+
+    float area2 = glm::length(glm::cross(p1 - p0, p2 - p0));
+
+    if (area2 < 0.0001f)
+        return FLT_MAX; // almost straight line
+
+    return (a * b * c) / area2;
+}
+
+float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, const std::shared_ptr<Track>& track)
+{
+    const auto& points = track->lanes[car->cur_lane];
+
+    int count = (int)points.size();
+
+    int i0 = (car->cur_curve_point - 1 + count) % count;
+    int i1 = car->cur_curve_point;
+    int i2 = (car->cur_curve_point + 1) % count;
+
+    float radius = ComputeCurveRadius(
+        points[i0],
+        points[i1],
+        points[i2]);
+
+    if (radius == FLT_MAX)
+        return 0.0f;
+
+    float lateral_accel = (car->speed * car->speed) / radius;
+
+    static constexpr float grip_limit = 42.0f;
+
+    return lateral_accel / grip_limit;
 }
