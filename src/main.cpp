@@ -150,6 +150,7 @@ struct Track
 {
     std::shared_ptr<Entity> entity;
 	std::vector<std::vector<glm::vec3>> lanes;
+	std::vector<float> lane_lengths;
 };
 
 // New user functions declarations
@@ -157,6 +158,7 @@ void DrawEntity(const std::shared_ptr<Entity> entity);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
 void UpdateCarEntity(double delta_time, Car* car, Track* track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
+std::vector<float> CalculateLaneLengthsNormalized(const std::vector<std::vector<glm::vec3>>& lanes);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -334,7 +336,8 @@ int main(int argc, char* argv[])
 	Track track
     {
 		.entity = curve_entity,
-		.lanes = SplitCurvePathInLanes(curve_points, 2)
+		.lanes = SplitCurvePathInLanes(curve_points, 2),
+		.lane_lengths = CalculateLaneLengthsNormalized(track.lanes)
 	};
 
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
@@ -1990,11 +1993,11 @@ void UpdateCarEntity(double delta_time, Car* car, Track* track)
 
     if (keys[car->input_keys.at(0)])
     {
-        car->speed += car_acceleration * float(delta_time);
+        car->speed += car_acceleration * track->lane_lengths[car->cur_lane] * float(delta_time);
     }
     else if (keys[car->input_keys.at(1)])
     {
-        car->speed -= car_acceleration * float(delta_time);
+        car->speed -= car_acceleration * track->lane_lengths[car->cur_lane] * float(delta_time);
     }
 
     car->speed *= powf(asphalt_friction, float(delta_time));
@@ -2089,4 +2092,29 @@ std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm:
     }
 
     return lanes;
+}
+
+std::vector<float> CalculateLaneLengthsNormalized(const std::vector<std::vector<glm::vec3>>& lanes)
+{
+	std::vector<float> lane_lengths_normalized;
+	lane_lengths_normalized.reserve(lanes.size());
+
+    for(const auto& lane : lanes)
+    {
+        float lane_length = 0.0f;
+        for (int32_t p = 0; p < lane.size() - 1; ++p)
+        {
+            lane_length += glm::distance(lane[p], lane[p + 1]);
+        }
+        lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
+        lane_lengths_normalized.push_back(lane_length);
+	}
+
+	const float max_lane_length = lane_lengths_normalized[0];
+    for(float& lane_length : lane_lengths_normalized)
+    {
+        lane_length /= max_lane_length;
+	}
+
+    return lane_lengths_normalized;
 }
