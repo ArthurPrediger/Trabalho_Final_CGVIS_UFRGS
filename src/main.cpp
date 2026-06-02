@@ -110,7 +110,7 @@ void PrintObjModelInfo(std::shared_ptr<ObjModel> model); // Função para debugg
 void TextRendering_Init();
 float TextRendering_LineHeight(GLFWwindow* window);
 float TextRendering_CharWidth(GLFWwindow* window);
-void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float x, float y, float scale = 1.0f);
+void TextRendering_PrintString(GLFWwindow* window, const std::string& str, float x, float y, float scale = 1.0f, glm::vec3 text_color = { 0, 0, 0 });
 void TextRendering_PrintMatrix(GLFWwindow* window, glm::mat4 M, float x, float y, float scale = 1.0f);
 void TextRendering_PrintVector(GLFWwindow* window, glm::vec4 v, float x, float y, float scale = 1.0f);
 void TextRendering_PrintMatrixVectorProduct(GLFWwindow* window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
@@ -151,6 +151,7 @@ public:
 	bool is_destabilized = false;
     float yaw_tremble_timer = 0.0f;
 	float destabilization_timer = 0.0f;
+	int32_t laps_completed = 0;
 };
 
 class Track : public Entity
@@ -163,6 +164,10 @@ public:
 };
 
 // New user functions declarations
+void UpdateGameMenu(GLFWwindow* window, double delta_time);
+void UpdateFreeCamera(double delta_time);
+void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars);
+void UpdateCountdownCamera(float normalized_countdown_time);
 void DrawEntity(const std::shared_ptr<Entity> entity);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
 void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
@@ -204,28 +209,17 @@ double g_mouse_cursor_delta_y = 0.0;
 bool g_first_mouse = true;
 bool keys[GLFW_KEY_LAST];
 
-// Variáveis que definem a câmera em coordenadas esféricas, controladas pelo
-// usuário através do mouse (veja função CursorPosCallback()). A posição
-// efetiva da câmera é calculada dentro da função main(), dentro do loop de
-// renderização.
-//float g_CameraTheta = 0.0f; // Ângulo no plano ZX em relação ao eixo Z
-//float g_CameraPhi = 0.0f;   // Ângulo em relação ao eixo Y
-//float g_CameraDistance = 3.5f; // Distância da câmera para a origem
-//
-//// Variáveis que controlam rotação do antebraço
-//float g_ForearmAngleZ = 0.0f;
-//float g_ForearmAngleX = 0.0f;
-//
-//// Variáveis que controlam translação do torso
-//float g_TorsoPositionX = 0.0f;
-//float g_TorsoPositionY = 0.0f;
+bool g_is_playing_countdown = false;
+bool g_is_game_running = false;
+int32_t g_num_laps = 4;
+constexpr int32_t g_init_curve_point = 250;
 
-glm::vec4 camera_position = { 0.0f, 0.0f, 0.0f, 1.0f };
-glm::vec4 camera_forward = { 0.0f, 0.0f, -1.0f, 0.0f };
+glm::vec4 camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
+glm::vec4 camera_forward = { 0.0f, 0.0f, 1.0f, 0.0f };
 glm::vec4 camera_up = { 0.0f, 1.0f, 0.0f, 0.0f };
 glm::vec4 camera_right = glm::vec4(glm::cross(glm::vec3(camera_forward), glm::vec3(camera_up)), 0.0f);
-float camera_pitch = 0.0f;
-float camera_yaw = -glm::half_pi<float>();
+float camera_pitch = glm::radians<float>(-36.38);
+float camera_yaw = glm::radians<float>(-212.90);
 constexpr float camera_move_speed = 16.0f;
 constexpr float camera_rotation_speed = 0.005f;
 //double delta_time = 0.0f;
@@ -362,8 +356,8 @@ int main(int argc, char* argv[])
     zr1_car0->input_keys = { GLFW_KEY_Z, GLFW_KEY_C };
     zr1_car0->wheels_scene_obj_comps = {};
     zr1_car0->wheels_transform_comps = {};
-    zr1_car0->cur_curve_point = 0;
-    zr1_car0->cur_curve_pos = track->lanes[0].front();
+    zr1_car0->cur_curve_point = g_init_curve_point;
+    zr1_car0->cur_curve_pos = track->lanes[0].at(zr1_car0->cur_curve_point);
     zr1_car0->cur_lane = 0;
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0->GetComponentsByType<SceneObjectComp>())
@@ -384,8 +378,8 @@ int main(int argc, char* argv[])
     zr1_car1->input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN };
     zr1_car1->wheels_scene_obj_comps = {};
     zr1_car1->wheels_transform_comps = {};
-    zr1_car1->cur_curve_point = 0;
-    zr1_car1->cur_curve_pos = track->lanes[1].front();
+    zr1_car1->cur_curve_point = g_init_curve_point;
+    zr1_car1->cur_curve_pos = track->lanes[1].at(zr1_car0->cur_curve_point);
     zr1_car1->cur_lane = 1;;
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1->GetComponentsByType<SceneObjectComp>())
@@ -410,6 +404,13 @@ int main(int argc, char* argv[])
 
     glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
 
+    constexpr float countdown_duration = 4.0f;
+    static float countdown_time = countdown_duration;
+
+    UpdateCountdownCamera(countdown_time);
+    UpdateCarEntity(0, zr1_car0, track);
+    UpdateCarEntity(0, zr1_car1, track);
+
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
     while (!glfwWindowShouldClose(window))
     {
@@ -418,46 +419,27 @@ int main(int argc, char* argv[])
         double delta_time = cur_time - last_time;
         last_time = cur_time;
 
+        if(g_is_playing_countdown)
+        {
+            countdown_time -= (float)(delta_time);
+            UpdateCountdownCamera(std::clamp(countdown_time / countdown_duration, 0.0f, 1.0f));
+
+            if(countdown_time <= 0)
+            {
+                g_is_playing_countdown = false;
+                g_is_game_running = true;
+			}
+		}
         // INPUTS UPDATE
-        // Camera rotation update
-        camera_yaw -= float(g_mouse_cursor_delta_x) * camera_rotation_speed;
-        camera_pitch += float(g_mouse_cursor_delta_y) * camera_rotation_speed;
-
-        camera_yaw = fmod(camera_yaw, glm::two_pi<float>());
-        camera_pitch = std::clamp(camera_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
-
-        camera_forward.x = cosf(camera_pitch) * cosf(camera_yaw);
-        camera_forward.y = sinf(camera_pitch);
-        camera_forward.z = cosf(camera_pitch) * sinf(camera_yaw);
-        camera_forward = glm::normalize(camera_forward);
-
-        camera_right = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_forward), { 0.0f, 1.0f, 0.0f })), 0.0f);
-        camera_up = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_right), glm::vec3(camera_forward))), 0.0f);
-
-        g_mouse_cursor_delta_x = 0.0f;
-        g_mouse_cursor_delta_y = 0.0f;
-
-        // Camera movement update
-        if (keys[GLFW_KEY_W])
+        if (g_is_game_running)
         {
-            camera_position += camera_forward * float(camera_move_speed * delta_time);
-        }
-        if (keys[GLFW_KEY_S])
-        {
-            camera_position -= camera_forward * float(camera_move_speed * delta_time);
-        }
-        if (keys[GLFW_KEY_D])
-        {
-            camera_position += camera_right * float(camera_move_speed * delta_time);
-        }
-        if (keys[GLFW_KEY_A])
-        {
-            camera_position -= camera_right * float(camera_move_speed * delta_time);
-        }
+            //UpdateFreeCamera(delta_time);
+            UpdateRaceCamera(delta_time, { zr1_car0, zr1_car1 });
 
-        // Cars movement and animation updates based on user input
-		UpdateCarEntity(delta_time, zr1_car0, track);
-        UpdateCarEntity(delta_time, zr1_car1, track);
+            // Cars movement and animation updates based on user input
+            UpdateCarEntity(delta_time, zr1_car0, track);
+            UpdateCarEntity(delta_time, zr1_car1, track);
+        }
 
         // Aqui executamos as operações de renderização
 
@@ -483,22 +465,6 @@ int main(int argc, char* argv[])
 
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // Computamos a posição da câmera utilizando coordenadas esféricas.  As
-        // variáveis g_CameraDistance, g_CameraPhi, e g_CameraTheta são
-        // controladas pelo mouse do usuário. Veja as funções CursorPosCallback()
-        // e ScrollCallback().
-        //float r = g_CameraDistance;
-        //float y = r*sin(g_CameraPhi);
-        //float z = r*cos(g_CameraPhi)*cos(g_CameraTheta);
-        //float x = r*cos(g_CameraPhi)*sin(g_CameraTheta);
-
-        // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        // Veja slides 195-227 e 229-234 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        //glm::vec4 camera_position_c  = glm::vec4(x,y,z,1.0f); // Ponto "c", centro da câmera
-        //glm::vec4 camera_lookat_l    = glm::vec4(0.0f,0.0f,0.0f,1.0f); // Ponto "l", para onde a câmera (look-at) estará sempre olhando
-        //glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; // Vetor "view", sentido para onde a câmera está virada
-        //glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); // Vetor "up" fixado para apontar para o "céu" (eito Y global)
-
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
         glm::mat4 view = Matrix_Camera_View(camera_position, camera_forward, camera_up);
@@ -511,26 +477,10 @@ int main(int argc, char* argv[])
         float nearplane = -0.1f;  // Posição do "near plane"
         float farplane  = -1000.0f; // Posição do "far plane"
 
-        if (g_UsePerspectiveProjection)
-        {
-            // Projeção Perspectiva.
-            // Para definição do field of view (FOV), veja slides 205-215 do documento Aula_09_Projecoes.pdf.
-            float field_of_view = 3.141592 / 3.0f;
-            projection = Matrix_Perspective(field_of_view, g_ScreenRatio, nearplane, farplane);
-        }
-        else
-        {
-            // Projeção Ortográfica.
-            // Para definição dos valores l, r, b, t ("left", "right", "bottom", "top"),
-            // PARA PROJEÇÃO ORTOGRÁFICA veja slides 219-224 do documento Aula_09_Projecoes.pdf.
-            // Para simular um "zoom" ortográfico, computamos o valor de "t"
-            // utilizando a variável g_CameraDistance.
-            float t = 1.5f*camera_position.length()/2.5f;
-            float b = -t;
-            float r = t*g_ScreenRatio;
-            float l = -r;
-            projection = Matrix_Orthographic(l, r, b, t, nearplane, farplane);
-        }
+        // Projeção Perspectiva.
+        // Para definição do field of view (FOV), veja slides 205-215 do documento Aula_09_Projecoes.pdf.
+        float field_of_view = 3.141592 / 3.0f;
+        projection = Matrix_Perspective(field_of_view, g_ScreenRatio, nearplane, farplane);
 
         // Enviamos as matrizes "view" e "projection" para a placa de vídeo
         // (GPU). Veja o arquivo "shader_vertex.glsl", onde estas são
@@ -546,6 +496,31 @@ int main(int argc, char* argv[])
 
         // Desenhamos o carro
         DrawEntity(zr1_car1);
+
+        if (!g_is_game_running && !g_is_playing_countdown)
+        {
+            UpdateGameMenu(window, delta_time);
+        }
+        else if (g_is_playing_countdown || countdown_time <= 0)
+        {
+            constexpr float countdown_text_scale = 4.0f;
+			constexpr glm::vec3 countdown_text_color = { 0.75f, 0.75f, 0.1f };
+            if(countdown_time > 0)
+            {
+                TextRendering_PrintString(window, std::to_string(int(std::ceil(countdown_time))), 0.0f - (TextRendering_CharWidth(window) / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
+            }
+            else
+            {
+				TextRendering_PrintString(window, "GO!", 0.0f - (TextRendering_CharWidth(window) * 3 / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
+                
+                countdown_time -= delta_time;
+				countdown_time < -1.5f ? countdown_time = countdown_duration : countdown_time;
+            }
+		}
+
+		//TextRendering_PrintVector(window, camera_position, -0.9, 0.9f);
+		//TextRendering_PrintString(window, std::to_string(glm::degrees(camera_pitch)), -0.7, 0.9f);
+		//TextRendering_PrintString(window, std::to_string(glm::degrees(camera_yaw)), -0.7, 0.85f);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -1807,6 +1782,285 @@ ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
 
         material_index++;
     }
+}
+
+void UpdateGameMenu(GLFWwindow* window, double delta_time)
+{
+    static constexpr float text_scale = 4.0f;
+    static std::vector<std::string> options = { "Play", "Exit" };
+	static int32_t selected_option = 0;
+	static bool is_key_just_pressed = false;
+    static float time_since_last_press = 0.0f;
+
+    if (is_key_just_pressed)
+    {
+        time_since_last_press += delta_time;
+        if (time_since_last_press >= 0.25f)
+        {
+            time_since_last_press = 0.0f;
+            is_key_just_pressed = false;
+        }
+    }
+
+    if(keys[GLFW_KEY_UP] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option - 1 + options.size()) % options.size();
+        is_key_just_pressed = true;
+    }
+    else if (keys[GLFW_KEY_DOWN] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option + 1) % options.size();
+        is_key_just_pressed = true;
+    }
+    if (keys[GLFW_KEY_ENTER] && !is_key_just_pressed)
+    {
+        if (selected_option == 0)
+        {
+            g_is_playing_countdown = true;
+        }
+        else if(selected_option == 1)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    }
+
+    for(int32_t i = 0; i < options.size(); i++)
+    {
+        if(i == selected_option)
+        {
+            TextRendering_PrintString(window, options[i].c_str(), 0.0f - (TextRendering_CharWidth(window) * 2 * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
+        }
+        else
+        {
+            TextRendering_PrintString(window, options[i].c_str(), 0.0f - (TextRendering_CharWidth(window) * 2 * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
+        }
+	}
+}
+
+void UpdateFreeCamera(double delta_time)
+{
+    // Camera rotation update
+    camera_yaw -= float(g_mouse_cursor_delta_x) * camera_rotation_speed;
+    camera_pitch += float(g_mouse_cursor_delta_y) * camera_rotation_speed;
+
+    camera_yaw = fmod(camera_yaw, glm::two_pi<float>());
+    camera_pitch = std::clamp(camera_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+
+    camera_forward.x = cosf(camera_pitch) * cosf(camera_yaw);
+    camera_forward.y = sinf(camera_pitch);
+    camera_forward.z = cosf(camera_pitch) * sinf(camera_yaw);
+    camera_forward = glm::normalize(camera_forward);
+
+    camera_right = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_forward), { 0.0f, 1.0f, 0.0f })), 0.0f);
+    camera_up = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_right), glm::vec3(camera_forward))), 0.0f);
+
+    g_mouse_cursor_delta_x = 0.0f;
+    g_mouse_cursor_delta_y = 0.0f;
+
+    // Camera movement update
+    if (keys[GLFW_KEY_W])
+    {
+        camera_position += camera_forward * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_S])
+    {
+        camera_position -= camera_forward * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_D])
+    {
+        camera_position += camera_right * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_A])
+    {
+        camera_position -= camera_right * float(camera_move_speed * delta_time);
+    }
+}
+
+void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars)
+{
+    if (cars.empty())
+        return;
+
+    //------------------------------------------------------
+    // Tunable parameters
+    //------------------------------------------------------
+
+    //constexpr float fixed_yaw = glm::radians(-45.0f);
+    //constexpr float fixed_pitch = glm::radians(-35.0f);
+
+    float fixed_yaw = camera_yaw;
+    float fixed_pitch = camera_pitch;
+
+    constexpr float min_distance = 6.0f;
+    constexpr float max_distance = 14.0f;
+    constexpr float zoom_factor = 2.4f;
+
+    constexpr float follow_speed = 6.0f;
+    constexpr float look_speed = 8.0f;
+
+    //------------------------------------------------------
+    // Compute center of all cars
+    //------------------------------------------------------
+
+    glm::vec3 target_center(0.0f);
+
+    for (const auto& car : cars)
+    {
+        target_center += glm::vec3(car->root->position);
+    }
+
+    target_center /= float(cars.size());
+
+    //------------------------------------------------------
+    // Measure cars spread
+    //------------------------------------------------------
+
+    float max_distance_from_center = 0.0f;
+
+    for (const auto& car : cars)
+    {
+        float d = glm::distance(glm::vec3(car->root->position), target_center);
+
+        max_distance_from_center = std::max(max_distance_from_center, d);
+    }
+
+    //------------------------------------------------------
+    // Camera forward from fixed rotation
+    //------------------------------------------------------
+
+    glm::vec3 forward;
+
+    forward.x = cosf(fixed_pitch) * cosf(fixed_yaw);
+    forward.y = sinf(fixed_pitch);
+    forward.z = cosf(fixed_pitch) * sinf(fixed_yaw);
+
+    forward = glm::normalize(forward);
+
+    //------------------------------------------------------
+    // Zoom based on spread
+    //------------------------------------------------------
+
+    float target_distance =
+        min_distance +
+        max_distance_from_center * zoom_factor;
+
+    target_distance =  std::clamp(target_distance, min_distance, max_distance);
+
+    //------------------------------------------------------
+    // Compute target camera position
+    //------------------------------------------------------
+
+    glm::vec3 target_position = target_center - forward * target_distance;
+
+    //------------------------------------------------------
+    // Smooth camera motion
+    //------------------------------------------------------
+
+    float position_t = 1.0f - expf(-follow_speed * float(delta_time));
+
+    camera_position =
+        glm::mix(
+            glm::vec4(camera_position),
+            glm::vec4(target_position, 1.0f),
+            position_t);
+
+    //------------------------------------------------------
+    // Camera orientation always looks at pack center
+    //------------------------------------------------------
+
+    glm::vec3 look_dir = glm::normalize(target_center - glm::vec3(camera_position));
+
+    camera_forward = glm::vec4(look_dir, 0.0f);
+
+    camera_right =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_forward),
+                    glm::vec3(0, 1, 0))),
+            0.0f);
+
+    camera_up =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_right),
+                    glm::vec3(camera_forward))),
+            0.0f);
+}
+
+void UpdateCountdownCamera(float normalized_countdown_time)
+{
+    constexpr glm::vec4 init_camera_position = { 4.74f, 0.84f, -0.52f, 1.0f };
+    constexpr float init_camera_pitch = glm::radians<float>(-21.77);
+    constexpr float init_camera_yaw = glm::radians<float>(-275.35);
+
+    constexpr glm::vec4 end_camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
+    constexpr float end_camera_pitch = glm::radians<float>(-36.38);
+    constexpr float end_camera_yaw = glm::radians<float>(-212.90);
+
+    normalized_countdown_time = glm::clamp(normalized_countdown_time, 0.0f, 1.0f);
+
+    //--------------------------------------------------
+    // Smooth cinematic easing
+    //--------------------------------------------------
+
+    float t = normalized_countdown_time;
+
+    // cubic ease-in-out
+    t = t * t * (3.0f - 2.0f * t);
+
+    //--------------------------------------------------
+    // Position interpolation
+    //--------------------------------------------------
+
+    camera_position =
+        glm::mix(
+            init_camera_position,
+            end_camera_position,
+            t);
+
+    //--------------------------------------------------
+    // Angle interpolation
+    //--------------------------------------------------
+
+    float pitch = glm::mix(init_camera_pitch, end_camera_pitch, t);
+
+    float yaw = glm::mix(init_camera_yaw, end_camera_yaw, t);
+
+    //--------------------------------------------------
+    // Build forward vector
+    //--------------------------------------------------
+
+    camera_forward.x = cosf(pitch) * cosf(yaw);
+
+    camera_forward.y = sinf(pitch);
+
+    camera_forward.z = cosf(pitch) * sinf(yaw);
+
+    camera_forward.w = 0.0f;
+
+    camera_forward = glm::normalize(camera_forward);
+
+    //--------------------------------------------------
+    // Rebuild camera basis
+    //--------------------------------------------------
+
+    camera_right =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_forward),
+                    glm::vec3(0, 1, 0))),
+            0.0f);
+
+    camera_up =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_right),
+                    glm::vec3(camera_forward))),
+            0.0f);
 }
 
 void DrawEntity(const std::shared_ptr<Entity> entity)
