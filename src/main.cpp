@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <iostream>
+#include <format>
 
 // Headers das bibliotecas OpenGL
 #include <glad/glad.h>   // Criação de contexto OpenGL 3.3
@@ -169,6 +170,7 @@ void UpdateFreeCamera(double delta_time);
 void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars);
 void UpdateCountdownCamera(float normalized_countdown_time);
 void DrawEntity(const std::shared_ptr<Entity> entity);
+void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
 void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
@@ -380,7 +382,7 @@ int main(int argc, char* argv[])
     zr1_car1->wheels_transform_comps = {};
     zr1_car1->cur_curve_point = g_init_curve_point;
     zr1_car1->cur_curve_pos = track->lanes[1].at(zr1_car0->cur_curve_point);
-    zr1_car1->cur_lane = 1;;
+    zr1_car1->cur_lane = 1;
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1->GetComponentsByType<SceneObjectComp>())
     {
@@ -517,6 +519,11 @@ int main(int argc, char* argv[])
 				countdown_time < -1.5f ? countdown_time = countdown_duration : countdown_time;
             }
 		}
+
+        if (g_is_playing_countdown || g_is_game_running)
+        {
+            UpdateRaceUserInterface(window, { zr1_car0, zr1_car1 });
+        }
 
 		//TextRendering_PrintVector(window, camera_position, -0.9, 0.9f);
 		//TextRendering_PrintString(window, std::to_string(glm::degrees(camera_pitch)), -0.7, 0.9f);
@@ -2207,6 +2214,22 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
     glBindTexture(GL_TEXTURE_2D, 0); // unbind
 }
 
+void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars)
+{
+    static const std::vector<glm::vec2> screen_pos_players_info{
+        { -0.9, 0.88 }, { 0.9, 0.88 }
+    };
+
+    static constexpr float text_scale = 1.5f;
+    for (int32_t i = 0; i < cars.size(); ++i)
+    {
+        glm::vec2 info_pos = screen_pos_players_info[i];
+        std::string player_text = std::format("Player {}: {}/{}", i, cars[i]->laps_completed, g_num_laps);
+        info_pos.x -= info_pos.x > 0 ? TextRendering_CharWidth(window) * player_text.size() * text_scale : 0;
+        TextRendering_PrintString(window, player_text, info_pos.x, info_pos.y, text_scale);
+    }
+}
+
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name)
 {
 	std::vector<std::shared_ptr<SceneObjectComp>> result;
@@ -2258,7 +2281,7 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
 	float destabilization_factor = car->is_destabilized ? 0.35f : 0.0f;
     car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
 
-    car->speed = std::clamp(car->speed, 0.0f, max_car_speed);
+    car->speed = std::clamp(car->speed, 0.0f, max_car_speed * track->normalized_lane_lengths[car->cur_lane]);
 
     const auto& track_points = track->lanes[car->cur_lane];
 
@@ -2272,6 +2295,10 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
 
         if (glm::dot(car_forward, track_points[next_point] - new_curve_pos) < 0)
         {
+            if (next_point == (g_init_curve_point - 1))
+            {
+                car->laps_completed++;
+            }
             next_point = (next_point + 1) % track_points.size();
             new_curve_pos = car->cur_curve_pos;
         }
@@ -2410,6 +2437,7 @@ std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<
 	std::vector<float> normalized_lane_lengths;
 	normalized_lane_lengths.reserve(lanes.size());
 
+    float min_lane_length = std::numeric_limits<float>::max();
     for(const auto& lane : lanes)
     {
         float lane_length = 0.0f;
@@ -2419,12 +2447,12 @@ std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<
         }
         lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
         normalized_lane_lengths.push_back(lane_length);
+        min_lane_length = std::min(min_lane_length, lane_length);
 	}
 
-	const float max_lane_length = normalized_lane_lengths[0];
     for(float& lane_length : normalized_lane_lengths)
     {
-        lane_length /= max_lane_length;
+        lane_length /= min_lane_length;
 	}
 
     return normalized_lane_lengths;
