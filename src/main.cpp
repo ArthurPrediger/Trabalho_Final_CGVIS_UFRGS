@@ -165,7 +165,9 @@ public:
 };
 
 // New user functions declarations
-void UpdateGameMenu(GLFWwindow* window, double delta_time);
+void UpdateGameStartScreen(GLFWwindow* window, double delta_time);
+void UpdateGameOverScreen(GLFWwindow* window, double delta_time, const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track);
+void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track);
 void UpdateFreeCamera(double delta_time);
 void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars);
 void UpdateCountdownCamera(float normalized_countdown_time);
@@ -211,10 +213,15 @@ double g_mouse_cursor_delta_y = 0.0;
 bool g_first_mouse = true;
 bool keys[GLFW_KEY_LAST];
 
+bool g_is_on_game_start = true;
 bool g_is_playing_countdown = false;
 bool g_is_game_running = false;
+bool g_is_game_over = false;
 int32_t g_num_laps = 4;
 constexpr int32_t g_init_curve_point = 250;
+
+static constexpr float g_countdown_duration = 4.0f;
+static float g_countdown_time = g_countdown_duration;
 
 glm::vec4 camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
 glm::vec4 camera_forward = { 0.0f, 0.0f, 1.0f, 0.0f };
@@ -354,13 +361,9 @@ int main(int argc, char* argv[])
     g_entities_virtual_scene_objs.emplace(zr1_car0->GetId(), zr1_car0->GetComponentsByType<SceneObjectComp>());
     zr1_car0->root->scale = { 0.25f, 0.25f, 0.25f };
 
-    zr1_car0->speed = 0.0f;
     zr1_car0->input_keys = { GLFW_KEY_Z, GLFW_KEY_C };
     zr1_car0->wheels_scene_obj_comps = {};
     zr1_car0->wheels_transform_comps = {};
-    zr1_car0->cur_curve_point = g_init_curve_point;
-    zr1_car0->cur_curve_pos = track->lanes[0].at(zr1_car0->cur_curve_point);
-    zr1_car0->cur_lane = 0;
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0->GetComponentsByType<SceneObjectComp>())
     {
@@ -376,13 +379,9 @@ int main(int argc, char* argv[])
     g_entities_virtual_scene_objs.emplace(zr1_car1->GetId(), zr1_car1->GetComponentsByType<SceneObjectComp>());
     zr1_car1->root->scale = { 0.25f, 0.25f, 0.25f };
 
-    zr1_car1->speed = 0.0f;
     zr1_car1->input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN };
     zr1_car1->wheels_scene_obj_comps = {};
     zr1_car1->wheels_transform_comps = {};
-    zr1_car1->cur_curve_point = g_init_curve_point;
-    zr1_car1->cur_curve_pos = track->lanes[1].at(zr1_car0->cur_curve_point);
-    zr1_car1->cur_lane = 1;
 
     for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1->GetComponentsByType<SceneObjectComp>())
     {
@@ -406,12 +405,9 @@ int main(int argc, char* argv[])
 
     glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
 
-    constexpr float countdown_duration = 4.0f;
-    static float countdown_time = countdown_duration;
+	std::vector<std::shared_ptr<Car>> cars = { zr1_car0, zr1_car1 };
 
-    UpdateCountdownCamera(countdown_time);
-    UpdateCarEntity(0, zr1_car0, track);
-    UpdateCarEntity(0, zr1_car1, track);
+    RestartGame(cars, track);
 
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
     while (!glfwWindowShouldClose(window))
@@ -423,10 +419,10 @@ int main(int argc, char* argv[])
 
         if(g_is_playing_countdown)
         {
-            countdown_time -= (float)(delta_time);
-            UpdateCountdownCamera(std::clamp(countdown_time / countdown_duration, 0.0f, 1.0f));
+            g_countdown_time -= (float)(delta_time);
+            UpdateCountdownCamera(std::clamp(g_countdown_time / g_countdown_duration, 0.0f, 1.0f));
 
-            if(countdown_time <= 0)
+            if(g_countdown_time <= 0)
             {
                 g_is_playing_countdown = false;
                 g_is_game_running = true;
@@ -436,11 +432,13 @@ int main(int argc, char* argv[])
         if (g_is_game_running)
         {
             //UpdateFreeCamera(delta_time);
-            UpdateRaceCamera(delta_time, { zr1_car0, zr1_car1 });
+            UpdateRaceCamera(delta_time, cars);
 
             // Cars movement and animation updates based on user input
-            UpdateCarEntity(delta_time, zr1_car0, track);
-            UpdateCarEntity(delta_time, zr1_car1, track);
+			for (std::shared_ptr<Car> car : cars)
+            {
+                UpdateCarEntity(delta_time, car, track);
+            }
         }
 
         // Aqui executamos as operações de renderização
@@ -493,36 +491,40 @@ int main(int argc, char* argv[])
         // Desenhamos a pista
 		DrawEntity(track);
 
-        // Desenhamos o carro
-        DrawEntity(zr1_car0);
-
-        // Desenhamos o carro
-        DrawEntity(zr1_car1);
-
-        if (!g_is_game_running && !g_is_playing_countdown)
+        // Desenhamos os carros
+        for (std::shared_ptr<Car> car : cars)
         {
-            UpdateGameMenu(window, delta_time);
+            DrawEntity(car);
         }
-        else if (g_is_playing_countdown || countdown_time <= 0)
+
+        if (g_is_on_game_start)
+        {
+            UpdateGameStartScreen(window, delta_time);
+        }
+        else if (g_is_playing_countdown || g_countdown_time <= 0)
         {
             constexpr float countdown_text_scale = 4.0f;
 			constexpr glm::vec3 countdown_text_color = { 0.75f, 0.75f, 0.1f };
-            if(countdown_time > 0)
+            if(g_countdown_time > 0)
             {
-                TextRendering_PrintString(window, std::to_string(int(std::ceil(countdown_time))), 0.0f - (TextRendering_CharWidth(window) / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
+                TextRendering_PrintString(window, std::to_string(int(std::ceil(g_countdown_time))), 0.0f - (TextRendering_CharWidth(window) / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
             }
             else
             {
 				TextRendering_PrintString(window, "GO!", 0.0f - (TextRendering_CharWidth(window) * 3 / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
                 
-                countdown_time -= delta_time;
-				countdown_time < -1.5f ? countdown_time = countdown_duration : countdown_time;
+                g_countdown_time -= delta_time;
+                g_countdown_time = g_countdown_time < -1.5f ? g_countdown_duration : g_countdown_time;
             }
+		}
+        else if(g_is_game_over)
+        {
+            UpdateGameOverScreen(window, delta_time, cars, track);
 		}
 
         if (g_is_playing_countdown || g_is_game_running)
         {
-            UpdateRaceUserInterface(window, { zr1_car0, zr1_car1 });
+            UpdateRaceUserInterface(window, cars);
         }
 
 		//TextRendering_PrintVector(window, camera_position, -0.9, 0.9f);
@@ -1791,7 +1793,7 @@ ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
     }
 }
 
-void UpdateGameMenu(GLFWwindow* window, double delta_time)
+void UpdateGameStartScreen(GLFWwindow* window, double delta_time)
 {
     static constexpr float text_scale = 4.0f;
     static std::vector<std::string> options = { "Play", "Exit" };
@@ -1823,6 +1825,7 @@ void UpdateGameMenu(GLFWwindow* window, double delta_time)
     {
         if (selected_option == 0)
         {
+			g_is_on_game_start = false;
             g_is_playing_countdown = true;
         }
         else if(selected_option == 1)
@@ -1835,13 +1838,106 @@ void UpdateGameMenu(GLFWwindow* window, double delta_time)
     {
         if(i == selected_option)
         {
-            TextRendering_PrintString(window, options[i].c_str(), 0.0f - (TextRendering_CharWidth(window) * 2 * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
         }
         else
         {
-            TextRendering_PrintString(window, options[i].c_str(), 0.0f - (TextRendering_CharWidth(window) * 2 * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
         }
 	}
+}
+
+void UpdateGameOverScreen(GLFWwindow* window, double delta_time, const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track)
+{
+    static constexpr float text_scale = 4.0f;
+    static std::vector<std::string> options = { "Play Again", "Exit" };
+    static int32_t selected_option = 0;
+    static bool is_key_just_pressed = false;
+    static float time_since_last_press = 0.0f;
+
+    if (is_key_just_pressed)
+    {
+        time_since_last_press += delta_time;
+        if (time_since_last_press >= 0.25f)
+        {
+            time_since_last_press = 0.0f;
+            is_key_just_pressed = false;
+        }
+    }
+    if(keys[GLFW_KEY_UP] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option - 1 + options.size()) % options.size();
+        is_key_just_pressed = true;
+    }
+    else if (keys[GLFW_KEY_DOWN] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option + 1) % options.size();
+        is_key_just_pressed = true;
+    }
+    if (keys[GLFW_KEY_ENTER] && !is_key_just_pressed)
+    {
+        if (selected_option == 0)
+        {
+            RestartGame(cars, track);
+			g_is_game_over = false;
+            g_is_playing_countdown = true;
+        }
+        else if(selected_option == 1)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    }
+
+    int32_t num_winners = 0;
+    int32_t player_index = 0;
+    for (std::shared_ptr<Car> car : cars)
+    {
+        if (car->laps_completed == g_num_laps)
+        {
+            static constexpr float winner_msg_scale = 6.0f;
+            std::string winner_msg = std::format("Player {} WON!", player_index);
+            TextRendering_PrintString(
+                window, winner_msg, 
+                0.0f - (TextRendering_CharWidth(window) * (winner_msg.size() / 2) * winner_msg_scale), 
+                0.5f - (num_winners * (TextRendering_LineHeight(window)) * winner_msg_scale), 
+                winner_msg_scale);
+
+            ++num_winners;
+        }
+        ++player_index;
+    }
+    
+    for (int32_t i = 0; i < options.size(); i++)
+    {
+        if (i == selected_option)
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), -0.35f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
+        }
+        else
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), -0.35f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
+        }
+    }
+}
+
+void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track)
+{
+    for (int32_t i = 0; i < cars.size(); ++i)
+    {
+        std::shared_ptr<Car> car = cars[i];
+		car->speed = 0.0f;
+		car->yaw_tremble_timer = 0.0f;
+        car->is_accelerating = false;
+		car->is_destabilized = false;
+        car->cur_curve_point = g_init_curve_point;
+        car->cur_lane = i;
+        car->cur_curve_pos = track->lanes[car->cur_lane].at(car->cur_curve_point);
+        car->laps_completed = 0;
+
+        UpdateCarEntity(0, car, track);
+    }
+
+    UpdateCountdownCamera(g_countdown_time);
 }
 
 void UpdateFreeCamera(double delta_time)
@@ -2297,7 +2393,8 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
         {
             if (next_point == (g_init_curve_point - 1))
             {
-                car->laps_completed++;
+                g_is_game_over = (++car->laps_completed == g_num_laps);
+				g_is_game_running = !g_is_game_over;
             }
             next_point = (next_point + 1) % track_points.size();
             new_curve_pos = car->cur_curve_pos;
