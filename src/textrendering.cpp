@@ -27,12 +27,21 @@ const GLchar* const textvertexshader_source = ""
 const GLchar* const textfragmentshader_source = ""
 "#version 330\n"
 "uniform sampler2D tex;\n"
-"in vec2 texCoords;\n"
 "uniform vec3 text_color;\n"
+"uniform float text_scale;\n"
+"in vec2 texCoords;\n"
 "out vec4 fragColor;\n"
 "void main()\n"
 "{\n"
-    "fragColor = vec4(text_color.r, text_color.g, text_color.b, texture(tex, texCoords).r);\n"
+    "float modifier = clamp(text_scale - 1.0, 0.0, 4.0) / 4.0;"
+    "float text_alpha = texture(tex, texCoords).r;\n"
+    "float text_alpha_clamped = clamp(texture(tex, texCoords).r + 0.45, 0.0, 1.0);\n"
+	"const float min_alpha = 0.6;\n"
+	"const float max_alpha = 0.9;\n"
+	"float diff_minmax = max_alpha - min_alpha;\n"
+	"float diff_text = text_alpha_clamped - min_alpha;\n"
+	"float alpha_ratio = clamp(diff_text / diff_minmax, 0.0, 1.0);\n"
+    "fragColor = vec4(text_color.r, text_color.g, text_color.b, mix(text_alpha, alpha_ratio, modifier));\n"
 "}\n"
 "\0";
 
@@ -88,6 +97,7 @@ GLuint textVBO;
 GLuint textprogram_id;
 GLuint texttexture_id;
 GLint g_text_color_uniform;
+GLint g_text_scale_uniform;
 
 void TextRendering_Init()
 {
@@ -118,6 +128,7 @@ void TextRendering_Init()
     GLuint text_texture_uniform;
     text_texture_uniform = glGetUniformLocation(textprogram_id, "tex");
     g_text_color_uniform = glGetUniformLocation(textprogram_id, "text_color");
+    g_text_scale_uniform = glGetUniformLocation(textprogram_id, "text_scale");
     glCheckError();
 
     GLuint textureunit = 31;
@@ -203,6 +214,7 @@ void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float
         glBindVertexArray(textVAO);
 
         glUniform3f(g_text_color_uniform, text_color.r, text_color.g, text_color.b);
+        glUniform1f(g_text_scale_uniform, scale);
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
