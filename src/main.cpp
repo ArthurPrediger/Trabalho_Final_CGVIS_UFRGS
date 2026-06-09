@@ -80,12 +80,15 @@ public:
     std::vector<tinyobj::material_t>  materials;
     std::unordered_map<uint32_t, MaterialTexturesIds> textures_ids;
 
+    glm::vec3 min_bounds;
+    glm::vec3 max_bounds;
+
     // Data per submesh/shape
-    std::vector<size_t>       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
+    std::vector<size_t>       first_indices; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
     std::vector<size_t>       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    std::vector<GLuint>       vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
-    std::vector<glm::vec3>    bbox_min; // Axis-Aligned Bounding Box do objeto
-    std::vector<glm::vec3>    bbox_max;
+    std::vector<GLuint>       vertex_array_object_ids; // ID do VAO onde estão armazenados os atributos do modelo
+    std::vector<glm::vec3>    bboxes_min; // Axis-Aligned Bounding Box do objeto
+    std::vector<glm::vec3>    bboxes_max;
 };
 
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
@@ -180,6 +183,7 @@ void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_p
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
 std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys);
 void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
+void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
 std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
 std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
@@ -415,6 +419,8 @@ int main(int argc, char* argv[])
             {
                 UpdateCarInputAndAnimation(delta_time, car, track);
             }
+
+            UpdateCarsPhysics(delta_time, cars, track);
         }
 
         // Aqui executamos as operações de renderização
@@ -896,13 +902,16 @@ void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model)
     std::vector<float>  normal_coefficients;
     std::vector<float>  texture_coefficients;
 
+    constexpr float minval = std::numeric_limits<float>::lowest();
+    constexpr float maxval = std::numeric_limits<float>::max();
+
+    model->min_bounds = glm::vec3(maxval, maxval, maxval);
+    model->max_bounds = glm::vec3(minval, minval, minval);
+
     for (size_t shape = 0; shape < model->shapes.size(); ++shape)
     {
         size_t first_index = indices.size();
         size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-
-        constexpr float minval = std::numeric_limits<float>::lowest();
-        constexpr float maxval = std::numeric_limits<float>::max();
 
         glm::vec3 bbox_min = glm::vec3(maxval,maxval,maxval);
         glm::vec3 bbox_max = glm::vec3(minval,minval,minval);
@@ -961,11 +970,14 @@ void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model)
 
         size_t last_index = indices.size() - 1;
 
-        model->first_index.push_back(first_index); // Primeiro índice
+        model->first_indices.push_back(first_index); // Primeiro índice
         model->num_indices.push_back(last_index - first_index + 1); // Número de indices
-        model->vertex_array_object_id.push_back(vertex_array_object_id);
-        model->bbox_min.push_back(bbox_min);
-        model->bbox_max.push_back(bbox_max);
+        model->vertex_array_object_ids.push_back(vertex_array_object_id);
+        model->bboxes_min.push_back(bbox_min);
+        model->bboxes_max.push_back(bbox_max);
+
+        model->min_bounds = glm::min(model->min_bounds, bbox_min);
+        model->max_bounds = glm::max(model->max_bounds, bbox_max);
     }
 
     GLuint VBO_model_coefficients_id;
@@ -2318,13 +2330,13 @@ std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForMode
     {
         std::shared_ptr<SceneObjectComp> scene_object = std::make_shared<SceneObjectComp>();
         scene_object->object_name = model->shapes[shape_index].name;
-        scene_object->first_index    = model->first_index[shape_index]; // Primeiro índice
+        scene_object->first_index    = model->first_indices[shape_index]; // Primeiro índice
         scene_object->num_indices    = model->num_indices[shape_index]; // Número de indices
         scene_object->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        scene_object->vertex_array_object_id = model->vertex_array_object_id[shape_index];
+        scene_object->vertex_array_object_id = model->vertex_array_object_ids[shape_index];
 
-        scene_object->bbox_min = model->bbox_min[shape_index];;
-        scene_object->bbox_max = model->bbox_max[shape_index];;
+        scene_object->bbox_min = model->bboxes_min[shape_index];;
+        scene_object->bbox_max = model->bboxes_max[shape_index];;
 
         scene_object->model = model;
         scene_object->submesh_index = shape_index;
@@ -2532,6 +2544,10 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     }
 
     car->root->rotation.y += yaw_offset;
+}
+
+void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track)
+{
 }
 
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes)
