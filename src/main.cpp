@@ -142,16 +142,19 @@ public:
 
 public:
 	float speed;
-	std::array<int32_t, 2> input_keys;
+	std::array<int32_t, 4> input_keys;
     std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps;
     std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps;
     int32_t cur_curve_point;
     glm::vec3 cur_curve_pos;
     int32_t cur_lane;
+    glm::vec3 transition_curve_pos;
+    int32_t target_lane;
 	bool is_accelerating = false;
 	bool is_destabilized = false;
     float yaw_tremble_timer = 0.0f;
 	float destabilization_timer = 0.0f;
+	float lane_transitioning_length = 0.0f;
 	int32_t laps_completed = 0;
 };
 
@@ -161,6 +164,7 @@ public:
     Track(const std::string& name = "") : Entity(name) {};
 public:
 	std::vector<std::vector<glm::vec3>> lanes;
+	std::vector<float> lane_lengths;
 	std::vector<float> normalized_lane_lengths;
 };
 
@@ -174,9 +178,11 @@ void UpdateCountdownCamera(float normalized_countdown_time);
 void DrawEntity(const std::shared_ptr<Entity> entity);
 void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars);
 std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
-void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys);
+void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
-std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
+std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
+std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
 float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2);
 float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, const std::shared_ptr<Track>& track);
 
@@ -222,6 +228,8 @@ constexpr int32_t g_init_curve_point = 250;
 
 static constexpr float g_countdown_duration = 4.0f;
 static float g_countdown_time = g_countdown_duration;
+
+static constexpr float g_lane_transitioning_length = 10.0f;
 
 glm::vec4 camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
 glm::vec4 camera_forward = { 0.0f, 0.0f, 1.0f, 0.0f };
@@ -348,49 +356,14 @@ int main(int argc, char* argv[])
     std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
 
     track->lanes = SplitCurvePathInLanes(curve_points, 2),
-        track->normalized_lane_lengths = CalculateNormalizedLaneLengths(track->lanes);
+    track->lane_lengths = ComputeLaneLengths(track->lanes);
+    track->normalized_lane_lengths = ComputeNormalizedLaneLengths(track->lanes);
 
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
     ComputeNormals(car_zr1_model);
     DivideModelMeshesByMaterial(car_zr1_model);
     BuildTrianglesAndBuffers(car_zr1_model);
     g_loaded_models.emplace(car_zr1_model->filepath, car_zr1_model);
-
-    std::shared_ptr<Car> zr1_car0 = std::make_shared<Car>("ZR1_car_0");
-    zr1_car0->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
-    g_entities_virtual_scene_objs.emplace(zr1_car0->GetId(), zr1_car0->GetComponentsByType<SceneObjectComp>());
-    zr1_car0->root->scale = { 0.25f, 0.25f, 0.25f };
-
-    zr1_car0->input_keys = { GLFW_KEY_Z, GLFW_KEY_C };
-    zr1_car0->wheels_scene_obj_comps = {};
-    zr1_car0->wheels_transform_comps = {};
-
-    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car0->GetComponentsByType<SceneObjectComp>())
-    {
-        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
-        {
-            zr1_car0->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            zr1_car0->wheels_scene_obj_comps.push_back(scene_obj_comp);
-        }
-    }
-
-    std::shared_ptr<Car> zr1_car1 = std::make_shared<Car>("ZR1_car_1");
-    zr1_car1->AddComponents(CreateSceneObjectComponentsForModelByName(car_zr1_model->filepath));
-    g_entities_virtual_scene_objs.emplace(zr1_car1->GetId(), zr1_car1->GetComponentsByType<SceneObjectComp>());
-    zr1_car1->root->scale = { 0.25f, 0.25f, 0.25f };
-
-    zr1_car1->input_keys = { GLFW_KEY_UP, GLFW_KEY_DOWN };
-    zr1_car1->wheels_scene_obj_comps = {};
-    zr1_car1->wheels_transform_comps = {};
-
-    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : zr1_car1->GetComponentsByType<SceneObjectComp>())
-    {
-        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
-        {
-            zr1_car1->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            zr1_car1->wheels_scene_obj_comps.push_back(scene_obj_comp);
-        }
-    }
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -405,7 +378,10 @@ int main(int argc, char* argv[])
 
     glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
 
-	std::vector<std::shared_ptr<Car>> cars = { zr1_car0, zr1_car1 };
+	std::vector<std::shared_ptr<Car>> cars = { 
+        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }),
+        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }),
+    };
 
     RestartGame(cars, track);
 
@@ -437,7 +413,7 @@ int main(int argc, char* argv[])
             // Cars movement and animation updates based on user input
 			for (std::shared_ptr<Car> car : cars)
             {
-                UpdateCarEntity(delta_time, car, track);
+                UpdateCarInputAndAnimation(delta_time, car, track);
             }
         }
 
@@ -1931,10 +1907,12 @@ void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<
 		car->is_destabilized = false;
         car->cur_curve_point = g_init_curve_point;
         car->cur_lane = i;
+        car->target_lane = i;
         car->cur_curve_pos = track->lanes[car->cur_lane].at(car->cur_curve_point);
+        car->transition_curve_pos = car->cur_curve_pos;
         car->laps_completed = 0;
 
-        UpdateCarEntity(0, car, track);
+        UpdateCarInputAndAnimation(0, car, track);
     }
 
     UpdateCountdownCamera(g_countdown_time);
@@ -1995,7 +1973,7 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
     float fixed_pitch = camera_pitch;
 
     constexpr float min_distance = 6.0f;
-    constexpr float max_distance = 14.0f;
+    constexpr float max_distance = 10.0f;
     constexpr float zoom_factor = 2.4f;
 
     constexpr float follow_speed = 6.0f;
@@ -2187,9 +2165,9 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
                 std::shared_ptr<TransformComp> transform_component = transform_components[0];
                 local_comp_transform_mat = Matrix_Translate(center.x, center.y, center.z)
                     * Matrix_Translate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
-                    * Matrix_Rotate_X(glm::radians(transform_component->rotation.x))
-                    * Matrix_Rotate_Y(glm::radians(transform_component->rotation.y))
                     * Matrix_Rotate_Z(glm::radians(transform_component->rotation.z))
+                    * Matrix_Rotate_Y(glm::radians(transform_component->rotation.y))
+                    * Matrix_Rotate_X(glm::radians(transform_component->rotation.x))
 					* Matrix_Scale(transform_component->scale.x, transform_component->scale.y, transform_component->scale.z)
                     * Matrix_Translate(-center.x, -center.y, -center.z);
             }
@@ -2357,27 +2335,75 @@ std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForMode
     return result;
 }
 
-void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys)
 {
-    static constexpr float max_car_speed = 64.0f;
+    std::shared_ptr<Car> car = std::make_shared<Car>(name);
+    car->AddComponents(CreateSceneObjectComponentsForModelByName(model->filepath));
+    g_entities_virtual_scene_objs.emplace(car->GetId(), car->GetComponentsByType<SceneObjectComp>());
+    car->root->scale = { 0.25f, 0.25f, 0.25f };
+
+    car->input_keys = input_keys;
+    car->wheels_scene_obj_comps = {};
+    car->wheels_transform_comps = {};
+
+    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : car->GetComponentsByType<SceneObjectComp>())
+    {
+        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
+        {
+            car->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
+            car->wheels_scene_obj_comps.push_back(scene_obj_comp);
+        }
+    }
+
+    return car;
+}
+
+void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+    static constexpr float max_car_speed = 50.0f;
     static constexpr float car_acceleration = 16.0f;
     static constexpr float asphalt_friction = 0.7f;
+
+	const float transition_progress = car->lane_transitioning_length / g_lane_transitioning_length;
+	const float transitioning_lane_length = track->normalized_lane_lengths[car->cur_lane] * (1 - transition_progress) +
+        track->normalized_lane_lengths[car->target_lane] * transition_progress;
 
     car->is_accelerating = false;
     if (keys[car->input_keys.at(0)] && !car->is_destabilized)
     {
-        car->speed += car_acceleration * track->normalized_lane_lengths[car->cur_lane] * float(delta_time);
+        car->speed += car_acceleration * transitioning_lane_length * float(delta_time);
         car->is_accelerating = true;
     }
     else if (keys[car->input_keys.at(1)] && !car->is_destabilized)
     {
-        car->speed -= car_acceleration * track->normalized_lane_lengths[car->cur_lane] * float(delta_time);
+        car->speed -= car_acceleration * transitioning_lane_length * float(delta_time);
     }
 
 	float destabilization_factor = car->is_destabilized ? 0.35f : 0.0f;
     car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
 
-    car->speed = std::clamp(car->speed, 0.0f, max_car_speed * track->normalized_lane_lengths[car->cur_lane]);
+    car->speed = std::clamp(car->speed, 0.0f, max_car_speed * transitioning_lane_length);
+
+    if (car->cur_lane != car->target_lane)
+    {
+        car->lane_transitioning_length += car->speed * (float)delta_time;
+
+        if (car->lane_transitioning_length >= g_lane_transitioning_length)
+        {
+            car->cur_lane = car->target_lane;
+            car->lane_transitioning_length = 0.0f;
+            car->cur_curve_pos = car->transition_curve_pos;
+        }
+    }
+
+    if (keys[car->input_keys.at(2)] && !car->is_destabilized && car->cur_lane == car->target_lane)
+    {
+		car->target_lane = std::max(0, car->target_lane - 1);
+    }
+    else if (keys[car->input_keys.at(3)] && !car->is_destabilized && car->cur_lane == car->target_lane)
+    {
+		car->target_lane = std::min(int32_t(track->lanes.size() - 1), car->target_lane + 1);
+    }
 
     const auto& track_points = track->lanes[car->cur_lane];
 
@@ -2402,11 +2428,26 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
         else
         {
             car->cur_curve_pos = new_curve_pos;
+			car->transition_curve_pos = new_curve_pos;
             car->cur_curve_point = next_point - 1;
             if (car->cur_curve_point < 0 || car->cur_curve_point >= track_points.size())
                 car->cur_curve_point = 0;
             break;
         }
+    }
+
+    const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
+
+    if (car->cur_lane != car->target_lane)
+    {
+        const auto& transitioning_lane_points = track->lanes[car->target_lane];
+        glm::vec3 lanes_points_diff = transitioning_lane_points[car->cur_curve_point] - track_points[car->cur_curve_point];
+        car->transition_curve_pos += lanes_points_diff * std::clamp((car->lane_transitioning_length / g_lane_transitioning_length), 0.0f, 1.0f);
+
+        glm::vec3 steering_forward = glm::normalize(transitioning_lane_points[(car->cur_curve_point + size_t(track->lane_lengths[car->target_lane] / g_lane_transitioning_length) * 2) % track_points.size()] - track_points[car->cur_curve_point]);
+        car_forward = glm::normalize(
+            steering_forward * std::abs(left_right_rotation_factor) +
+			car_forward * (1.0f - std::abs(left_right_rotation_factor)));
     }
 
     float theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
@@ -2419,14 +2460,14 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
 
     glm::vec3 world_up = glm::vec3(0.0f, 1.0f, 0.0f);
     glm::vec3 car_right = glm::normalize(glm::cross(world_up, car_forward));
-    glm::vec3 car_up =glm::normalize(glm::cross(car_forward, car_right));
+    glm::vec3 car_up = glm::normalize(glm::cross(car_forward, car_right));
     float roll = glm::degrees(atan2(glm::dot(car_right, world_up), glm::dot(car_up, world_up)));
 
     glm::vec3 car_world_rotation = { phi, theta, roll };
 
     glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
     model *= Matrix_Scale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
-    glm::vec3 car_world_pos = model * glm::vec4(car->cur_curve_pos, 1.0f);
+    glm::vec3 car_world_pos = model * glm::vec4(car->transition_curve_pos, 1.0f);
 
     car->root->position = car_world_pos;
     car->root->rotation = car_world_rotation;
@@ -2438,6 +2479,7 @@ void UpdateCarEntity(double delta_time, std::shared_ptr<Car> car, std::shared_pt
         std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
         float radius = (scene_obj_comp->bbox_max.y - scene_obj_comp->bbox_min.y) * 0.5f * car->root->scale.y;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
+        wheel_transform_comp->rotation.y = 35.0f * left_right_rotation_factor;
     }
 
 	// Car destabilization update
@@ -2529,7 +2571,26 @@ std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm:
     return lanes;
 }
 
-std::vector<float> CalculateNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
+std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
+{
+    std::vector<float> lane_lengths;
+    lane_lengths.reserve(lanes.size());
+
+    for (const auto& lane : lanes)
+    {
+        float lane_length = 0.0f;
+        for (int32_t p = 0; p < lane.size() - 1; ++p)
+        {
+            lane_length += glm::distance(lane[p], lane[p + 1]);
+        }
+        lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
+        lane_lengths.push_back(lane_length);
+    }
+
+    return lane_lengths;
+}
+
+std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
 {
 	std::vector<float> normalized_lane_lengths;
 	normalized_lane_lengths.reserve(lanes.size());
@@ -2589,7 +2650,7 @@ float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, c
 
     float lateral_accel = (car->speed * car->speed) / radius;
 
-    static constexpr float grip_limit = 42.0f;
+    static constexpr float grip_limit = 32.0f;
 
     return lateral_accel / grip_limit;
 }
