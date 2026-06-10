@@ -154,9 +154,9 @@ public:
     glm::vec3 transition_curve_pos;
     int32_t target_lane;
 	bool is_accelerating = false;
-	bool is_destabilized = false;
+	bool is_out_of_control = false;
     float yaw_tremble_timer = 0.0f;
-	float destabilization_timer = 0.0f;
+	float out_of_control_timer = 0.0f;
 	float lane_transitioning_length = 0.0f;
 	int32_t laps_completed = 0;
 };
@@ -420,7 +420,7 @@ int main(int argc, char* argv[])
                 UpdateCarInputAndAnimation(delta_time, car, track);
             }
 
-            UpdateCarsPhysics(delta_time, cars, track);
+            //UpdateCarsPhysics(delta_time, cars, track);
         }
 
         // Aqui executamos as operações de renderização
@@ -1916,7 +1916,7 @@ void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<
 		car->speed = 0.0f;
 		car->yaw_tremble_timer = 0.0f;
         car->is_accelerating = false;
-		car->is_destabilized = false;
+		car->is_out_of_control = false;
         car->cur_curve_point = g_init_curve_point;
         car->cur_lane = i;
         car->target_lane = i;
@@ -2381,17 +2381,17 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
         track->normalized_lane_lengths[car->target_lane] * transition_progress;
 
     car->is_accelerating = false;
-    if (keys[car->input_keys.at(0)] && !car->is_destabilized)
+    if (keys[car->input_keys.at(0)] && !car->is_out_of_control)
     {
         car->speed += car_acceleration * transitioning_lane_length * float(delta_time);
         car->is_accelerating = true;
     }
-    else if (keys[car->input_keys.at(1)] && !car->is_destabilized)
+    else if (keys[car->input_keys.at(1)] && !car->is_out_of_control)
     {
         car->speed -= car_acceleration * transitioning_lane_length * float(delta_time);
     }
 
-	float destabilization_factor = car->is_destabilized ? 0.35f : 0.0f;
+	float destabilization_factor = car->is_out_of_control ? 0.35f : 0.0f;
     car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
 
     car->speed = std::clamp(car->speed, 0.0f, max_car_speed * transitioning_lane_length);
@@ -2408,11 +2408,11 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
         }
     }
 
-    if (keys[car->input_keys.at(2)] && !car->is_destabilized && car->cur_lane == car->target_lane)
+    if (keys[car->input_keys.at(2)] && !car->is_out_of_control && car->cur_lane == car->target_lane)
     {
 		car->target_lane = std::max(0, car->target_lane - 1);
     }
-    else if (keys[car->input_keys.at(3)] && !car->is_destabilized && car->cur_lane == car->target_lane)
+    else if (keys[car->input_keys.at(3)] && !car->is_out_of_control && car->cur_lane == car->target_lane)
     {
 		car->target_lane = std::min(int32_t(track->lanes.size() - 1), car->target_lane + 1);
     }
@@ -2503,7 +2503,7 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
 
     float yaw_offset = 0.0f;
 
-    if (!car->is_destabilized)
+    if (!car->is_out_of_control)
     {
         if (car0_ratio > warning_threshold && car0_ratio <= skid_threshold)
         {
@@ -2522,8 +2522,8 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
         else if (car0_ratio > skid_threshold && car->is_accelerating)
         {
             car->is_accelerating = false;
-            car->is_destabilized = true;
-            car->destabilization_timer = 0.0f;
+            car->is_out_of_control = true;
+            car->out_of_control_timer = 0.0f;
         }
     }
     else
@@ -2533,21 +2533,144 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
 
         yaw_offset = skid_tremble * sinf(car->yaw_tremble_timer * skid_frequency);
 
-        car->destabilization_timer += delta_time;
+        car->out_of_control_timer += delta_time;
 
         static constexpr float destabilization_duration = 2.0f;
-        if (car->destabilization_timer >= destabilization_duration)
+        if (car->out_of_control_timer >= destabilization_duration)
         {
-            car->is_destabilized = false;
-            car->destabilization_timer = 0.0f;
+            car->is_out_of_control = false;
+            car->out_of_control_timer = 0.0f;
         }
     }
 
     car->root->rotation.y += yaw_offset;
 }
 
+struct Aabb
+{
+    glm::vec3 min;
+	glm::vec3 max;
+};
+
+bool Intersects(const Aabb& a, const Aabb& b)
+{
+    return
+        a.min.x <= b.max.x &&
+        a.max.x >= b.min.x &&
+
+        a.min.y <= b.max.y &&
+        a.max.y >= b.min.y &&
+
+        a.min.z <= b.max.z &&
+        a.max.z >= b.min.z;
+}
+
 void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track)
 {
+	std::vector<Aabb> cars_aabbs;
+
+    for (std::shared_ptr<Car> car : cars)
+    {
+        glm::mat4 model_transform = Matrix_Translate(car->root->position.x, car->root->position.y, car->root->position.z)
+            * Matrix_Rotate_X(glm::radians(car->root->rotation.x))
+            * Matrix_Rotate_Y(glm::radians(car->root->rotation.y))
+            * Matrix_Rotate_Z(glm::radians(car->root->rotation.z))
+            * Matrix_Scale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
+
+        std::shared_ptr<ObjModel> car_model = g_entities_virtual_scene_objs[car->GetId()].front()->model;
+        const glm::vec3& min = car_model->min_bounds;
+        const glm::vec3& max = car_model->max_bounds;
+
+        glm::vec3 corners[8] =
+        {
+            {min.x, min.y, min.z},
+            {max.x, min.y, min.z},
+            {min.x, max.y, min.z},
+            {max.x, max.y, min.z},
+            {min.x, min.y, max.z},
+            {max.x, min.y, max.z},
+            {min.x, max.y, max.z},
+            {max.x, max.y, max.z}
+        };
+
+        glm::vec3 new_min(FLT_MAX);
+        glm::vec3 new_max(-FLT_MAX);
+
+        for (int k = 0; k < 8; ++k)
+        {
+            glm::vec3 p = model_transform * glm::vec4(corners[k], 1.0f);
+
+            new_min = glm::min(new_min, p);
+            new_max = glm::max(new_max, p);
+        }
+
+        Aabb car_aabb = { new_min, new_max };
+
+        cars_aabbs.push_back(car_aabb);
+    }
+
+    auto handle_same_lane_collision = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
+        car_behind->target_lane = car_behind->cur_lane >= track->lanes.size() - 1 ? car_behind->cur_lane - 1 : car_behind->cur_lane + 1;
+
+        if (!car_in_front->is_out_of_control)
+        {
+            car_in_front->is_accelerating = false;
+            car_in_front->is_out_of_control = true;
+            car_in_front->out_of_control_timer = 0.0f;
+        }
+        };
+
+    auto handle_lateral_collision = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
+        car_in_front->lane_transitioning_length = car_in_front->target_lane != car_in_front->cur_lane ? 
+            g_lane_transitioning_length - car_in_front->lane_transitioning_length : 0.0f;
+        car_in_front->target_lane = car_in_front->cur_lane;
+
+        car_behind->lane_transitioning_length = car_behind->target_lane != car_behind->cur_lane ?
+            g_lane_transitioning_length - car_behind->lane_transitioning_length : 0.0f;
+        car_behind->target_lane = car_behind->cur_lane;
+
+        if (!car_in_front->is_out_of_control)
+        {
+            car_in_front->is_accelerating = false;
+            car_in_front->is_out_of_control = true;
+            car_in_front->out_of_control_timer = 0.0f;
+        }
+        };
+
+    for (int32_t i = 0; i < cars.size() - 1; ++i)
+    {
+        std::shared_ptr<Car> this_car = cars[i];
+        const Aabb& this_car_aabb = cars_aabbs[i];
+
+        for (int32_t j = i + 1; j < cars.size(); ++j)
+        {
+            std::shared_ptr<Car> other_car = cars[j];
+            const Aabb& other_car_aabb = cars_aabbs[j];
+
+            // if aabbs not overlap continue
+            if (!Intersects(this_car_aabb, other_car_aabb)) continue;
+
+            if (this_car->cur_lane == other_car->cur_lane)
+            {
+                // if this car is behind
+                if (true)
+                    handle_same_lane_collision(other_car, this_car);
+                // if the other car is behind
+                else
+                    handle_same_lane_collision(this_car, other_car);
+            }
+            // if this car is touching the other's rear
+            else if (true)
+            {
+                handle_lateral_collision(other_car, this_car);
+            }
+            // if other car is touching this one's rear
+            else if (true)
+            {
+                handle_lateral_collision(this_car, other_car);
+            }
+        }
+    }
 }
 
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes)
