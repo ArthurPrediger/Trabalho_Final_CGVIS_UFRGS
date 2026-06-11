@@ -1,3 +1,4 @@
+
 //     Universidade Federal do Rio Grande do Sul
 //             Instituto de Informática
 //       Departamento de Informática Aplicada
@@ -188,7 +189,8 @@ std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm:
 std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
 std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
 float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2);
-float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, const std::shared_ptr<Track>& track);
+float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::shared_ptr<Track> track);
+glm::vec3 GetCarForwardVector(std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -420,7 +422,7 @@ int main(int argc, char* argv[])
                 UpdateCarInputAndAnimation(delta_time, car, track);
             }
 
-            //UpdateCarsPhysics(delta_time, cars, track);
+            UpdateCarsPhysics(delta_time, cars, track);
         }
 
         // Aqui executamos as operações de renderização
@@ -2650,22 +2652,29 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
             // if aabbs not overlap continue
             if (!Intersects(this_car_aabb, other_car_aabb)) continue;
 
+			const glm::vec3& this_car_pos = this_car->root->position;
+			const glm::vec3& this_car_forward = GetCarForwardVector(this_car, track);
+			const glm::vec3& other_car_pos = other_car->root->position;
+			const glm::vec3& other_car_forward = GetCarForwardVector(other_car, track);
+
+			const glm::vec3 diff_other_to_this = other_car_pos - this_car_pos;
+
             if (this_car->cur_lane == other_car->cur_lane)
             {
                 // if this car is behind
-                if (true)
+                if (glm::dot(diff_other_to_this, this_car_forward) > 0.0f)
                     handle_same_lane_collision(other_car, this_car);
                 // if the other car is behind
                 else
                     handle_same_lane_collision(this_car, other_car);
             }
             // if this car is touching the other's rear
-            else if (true)
+            else if (glm::dot(diff_other_to_this, this_car_forward) > 0.0f)
             {
                 handle_lateral_collision(other_car, this_car);
             }
             // if other car is touching this one's rear
-            else if (true)
+            else if (glm::dot(diff_other_to_this, other_car_forward) > 0.0f)
             {
                 handle_lateral_collision(this_car, other_car);
             }
@@ -2769,7 +2778,7 @@ float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::ve
     return (a * b * c) / area2;
 }
 
-float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, const std::shared_ptr<Track>& track)
+float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::shared_ptr<Track> track)
 {
     const auto& points = track->lanes[car->cur_lane];
 
@@ -2792,4 +2801,9 @@ float ComputeCarSpeedRelativeToTrackCurvature(const std::shared_ptr<Car>& car, c
     static constexpr float grip_limit = 32.0f;
 
     return lateral_accel / grip_limit;
+}
+
+glm::vec3 GetCarForwardVector(std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+	return track->lanes[car->cur_lane][((size_t)car->cur_curve_point + 1) % track->lanes[car->cur_lane].size()] - track->lanes[car->cur_lane][car->cur_curve_point];
 }
