@@ -145,6 +145,7 @@ public:
 	Car(const std::string& name = "") : Entity(name) {};
 
 public:
+    glm::vec3 forward = glm::vec3(0.0f);
 	float speed;
 	std::array<int32_t, 4> input_keys;
     std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps;
@@ -190,7 +191,6 @@ std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>&
 std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
 float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2);
 float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::shared_ptr<Track> track);
-glm::vec3 GetCarForwardVector(std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -229,7 +229,7 @@ bool g_is_on_game_start = true;
 bool g_is_playing_countdown = false;
 bool g_is_game_running = false;
 bool g_is_game_over = false;
-int32_t g_num_laps = 4;
+int32_t g_num_laps = 128;
 constexpr int32_t g_init_curve_point = 250;
 
 static constexpr float g_countdown_duration = 4.0f;
@@ -2372,6 +2372,77 @@ std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<Ob
     return car;
 }
 
+void UpdateCarTransformOnTrack(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+    const auto& track_points = track->lanes[car->cur_lane];
+    // Car animation path update
+    int32_t next_point = (car->cur_curve_point + 1) % track_points.size();
+    glm::vec3 car_forward;
+    while (true)
+    {
+        car_forward = glm::normalize(track_points[next_point] - track_points[car->cur_curve_point]);
+        glm::vec3 new_curve_pos = car->cur_curve_pos + car->speed * (float)delta_time * car_forward;
+
+        if (glm::dot(car_forward, track_points[next_point] - new_curve_pos) < 0)
+        {
+            if (next_point == (g_init_curve_point - 1))
+            {
+                g_is_game_over = (++car->laps_completed == g_num_laps);
+                g_is_game_running = !g_is_game_over;
+            }
+            next_point = (next_point + 1) % track_points.size();
+            new_curve_pos = car->cur_curve_pos;
+        }
+        else
+        {
+            car->cur_curve_pos = new_curve_pos;
+            car->transition_curve_pos = new_curve_pos;
+            car->cur_curve_point = next_point - 1;
+            if (car->cur_curve_point < 0 || car->cur_curve_point >= track_points.size())
+                car->cur_curve_point = 0;
+            break;
+        }
+    }
+
+    const float transition_progress = car->lane_transitioning_length / g_lane_transitioning_length;
+    const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
+
+    if (car->cur_lane != car->target_lane)
+    {
+        const auto& transitioning_lane_points = track->lanes[car->target_lane];
+        glm::vec3 lanes_points_diff = transitioning_lane_points[car->cur_curve_point] - track_points[car->cur_curve_point];
+        car->transition_curve_pos += lanes_points_diff * std::clamp((car->lane_transitioning_length / g_lane_transitioning_length), 0.0f, 1.0f);
+
+        glm::vec3 steering_forward = glm::normalize(transitioning_lane_points[(car->cur_curve_point + size_t(track->lane_lengths[car->target_lane] / g_lane_transitioning_length) * 2) % track_points.size()] - track_points[car->cur_curve_point]);
+        car_forward = glm::normalize(
+            steering_forward * std::abs(left_right_rotation_factor) +
+            car_forward * (1.0f - std::abs(left_right_rotation_factor)));
+    }
+
+    float theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
+    if (car_forward.x < 0)
+        theta = glm::degrees(glm::two_pi<float>()) - theta;
+
+    float phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
+    if (car_forward.z > 0)
+        phi = glm::degrees(glm::two_pi<float>()) - phi;
+
+    glm::vec3 world_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 car_right = glm::normalize(glm::cross(world_up, car_forward));
+    glm::vec3 car_up = glm::normalize(glm::cross(car_forward, car_right));
+    float roll = glm::degrees(atan2(glm::dot(car_right, world_up), glm::dot(car_up, world_up)));
+
+    glm::vec3 car_world_rotation = { phi, theta, roll };
+
+    glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
+    model *= Matrix_Scale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
+    glm::vec3 car_world_pos = model * glm::vec4(car->transition_curve_pos, 1.0f);
+
+    car->root->position = car_world_pos;
+    car->root->rotation = car_world_rotation;
+    car->forward = car_forward;
+}
+
 void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
 {
     static constexpr float max_car_speed = 50.0f;
@@ -2419,72 +2490,9 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
 		car->target_lane = std::min(int32_t(track->lanes.size() - 1), car->target_lane + 1);
     }
 
-    const auto& track_points = track->lanes[car->cur_lane];
-
-    // Car animation path update
-    int32_t next_point = (car->cur_curve_point + 1) % track_points.size();
-    glm::vec3 car_forward(0.0f);
-    while (true)
-    {
-        car_forward = glm::normalize(track_points[next_point] - track_points[car->cur_curve_point]);
-        glm::vec3 new_curve_pos = car->cur_curve_pos + car->speed * (float)delta_time * car_forward;
-
-        if (glm::dot(car_forward, track_points[next_point] - new_curve_pos) < 0)
-        {
-            if (next_point == (g_init_curve_point - 1))
-            {
-                g_is_game_over = (++car->laps_completed == g_num_laps);
-				g_is_game_running = !g_is_game_over;
-            }
-            next_point = (next_point + 1) % track_points.size();
-            new_curve_pos = car->cur_curve_pos;
-        }
-        else
-        {
-            car->cur_curve_pos = new_curve_pos;
-			car->transition_curve_pos = new_curve_pos;
-            car->cur_curve_point = next_point - 1;
-            if (car->cur_curve_point < 0 || car->cur_curve_point >= track_points.size())
-                car->cur_curve_point = 0;
-            break;
-        }
-    }
+	UpdateCarTransformOnTrack(delta_time, car, track);
 
     const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
-
-    if (car->cur_lane != car->target_lane)
-    {
-        const auto& transitioning_lane_points = track->lanes[car->target_lane];
-        glm::vec3 lanes_points_diff = transitioning_lane_points[car->cur_curve_point] - track_points[car->cur_curve_point];
-        car->transition_curve_pos += lanes_points_diff * std::clamp((car->lane_transitioning_length / g_lane_transitioning_length), 0.0f, 1.0f);
-
-        glm::vec3 steering_forward = glm::normalize(transitioning_lane_points[(car->cur_curve_point + size_t(track->lane_lengths[car->target_lane] / g_lane_transitioning_length) * 2) % track_points.size()] - track_points[car->cur_curve_point]);
-        car_forward = glm::normalize(
-            steering_forward * std::abs(left_right_rotation_factor) +
-			car_forward * (1.0f - std::abs(left_right_rotation_factor)));
-    }
-
-    float theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
-    if (car_forward.x < 0)
-        theta = glm::degrees(glm::two_pi<float>()) - theta;
-
-    float phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
-    if (car_forward.z > 0)
-        phi = glm::degrees(glm::two_pi<float>()) - phi;
-
-    glm::vec3 world_up = glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 car_right = glm::normalize(glm::cross(world_up, car_forward));
-    glm::vec3 car_up = glm::normalize(glm::cross(car_forward, car_right));
-    float roll = glm::degrees(atan2(glm::dot(car_right, world_up), glm::dot(car_up, world_up)));
-
-    glm::vec3 car_world_rotation = { phi, theta, roll };
-
-    glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
-    model *= Matrix_Scale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
-    glm::vec3 car_world_pos = model * glm::vec4(car->transition_curve_pos, 1.0f);
-
-    car->root->position = car_world_pos;
-    car->root->rotation = car_world_rotation;
 
     // Car wheels animation update
     for (int32_t i = 0; i < car->wheels_scene_obj_comps.size(); ++i)
@@ -2548,71 +2556,265 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     car->root->rotation.y += yaw_offset;
 }
 
-struct Aabb
+struct Obb
 {
-    glm::vec3 min;
-	glm::vec3 max;
+    glm::vec3 center;
+    glm::vec3 half_extents;
+
+    std::array<glm::vec3, 3> axis;
 };
 
-bool Intersects(const Aabb& a, const Aabb& b)
+Obb CreateObb(const ObjModel& model, const glm::mat4& transform)
 {
-    return
-        a.min.x <= b.max.x &&
-        a.max.x >= b.min.x &&
+    Obb result;
 
-        a.min.y <= b.max.y &&
-        a.max.y >= b.min.y &&
+    glm::vec3 local_center = (model.min_bounds + model.max_bounds) * 0.5f;
 
-        a.min.z <= b.max.z &&
-        a.max.z >= b.min.z;
+    glm::vec3 local_extents = (model.max_bounds - model.min_bounds) * 0.5f;
+
+
+    glm::vec4 world_center = transform * glm::vec4(local_center, 1.0f);
+
+    result.center = glm::vec3(world_center);
+
+    result.half_extents = local_extents *
+        glm::vec3(
+            glm::length(glm::vec3(transform[0])),
+            glm::length(glm::vec3(transform[1])),
+            glm::length(glm::vec3(transform[2]))
+        );
+
+    result.axis[0] = glm::normalize(glm::vec3(transform[0]));
+    result.axis[1] = glm::normalize(glm::vec3(transform[1]));
+    result.axis[2] = glm::normalize(glm::vec3(transform[2]));
+
+    return result;
+}
+
+bool Intersects(const Obb& a, const Obb& b)
+{
+    constexpr float EPSILON = 1e-6f;
+
+    glm::mat3 R;
+    glm::mat3 AbsR;
+
+    // Rotation matrix from B's coordinate frame into A's frame
+    for (int i = 0; i < 3; ++i)
+    {
+        for (int j = 0; j < 3; ++j)
+        {
+            R[i][j] = glm::dot(a.axis[i], b.axis[j]);
+            AbsR[i][j] = fabs(R[i][j]) + EPSILON;
+        }
+    }
+
+    // Translation vector from A to B expressed in A's coordinate frame
+    glm::vec3 t = b.center - a.center;
+
+    t = glm::vec3(
+        glm::dot(t, a.axis[0]),
+        glm::dot(t, a.axis[1]),
+        glm::dot(t, a.axis[2])
+    );
+
+
+    float ra;
+    float rb;
+
+
+    // Test axes of A
+    for (int i = 0; i < 3; ++i)
+    {
+        ra = a.half_extents[i];
+
+        rb =
+            b.half_extents[0] * AbsR[i][0] +
+            b.half_extents[1] * AbsR[i][1] +
+            b.half_extents[2] * AbsR[i][2];
+
+        if (fabs(t[i]) > ra + rb)
+            return false;
+    }
+
+
+    // Test axes of B
+    for (int i = 0; i < 3; ++i)
+    {
+        ra =
+            a.half_extents[0] * AbsR[0][i] +
+            a.half_extents[1] * AbsR[1][i] +
+            a.half_extents[2] * AbsR[2][i];
+
+        rb = b.half_extents[i];
+
+        float distance =
+            fabs(
+                t[0] * R[0][i] +
+                t[1] * R[1][i] +
+                t[2] * R[2][i]
+            );
+
+        if (distance > ra + rb)
+            return false;
+    }
+
+
+    // Test cross products of A's axes and B's axes
+    // L = A0 x B0
+    ra =
+        a.half_extents[1] * AbsR[2][0] +
+        a.half_extents[2] * AbsR[1][0];
+
+    rb =
+        b.half_extents[1] * AbsR[0][2] +
+        b.half_extents[2] * AbsR[0][1];
+
+    if (fabs(t[2] * R[1][0] - t[1] * R[2][0]) > ra + rb)
+        return false;
+
+
+    // L = A0 x B1
+    ra =
+        a.half_extents[1] * AbsR[2][1] +
+        a.half_extents[2] * AbsR[1][1];
+
+    rb =
+        b.half_extents[0] * AbsR[0][2] +
+        b.half_extents[2] * AbsR[0][0];
+
+    if (fabs(t[2] * R[1][1] - t[1] * R[2][1]) > ra + rb)
+        return false;
+
+
+    // L = A0 x B2
+    ra =
+        a.half_extents[1] * AbsR[2][2] +
+        a.half_extents[2] * AbsR[1][2];
+
+    rb =
+        b.half_extents[0] * AbsR[0][1] +
+        b.half_extents[1] * AbsR[0][0];
+
+    if (fabs(t[2] * R[1][2] - t[1] * R[2][2]) > ra + rb)
+        return false;
+
+
+    // L = A1 x B0
+    ra =
+        a.half_extents[0] * AbsR[2][0] +
+        a.half_extents[2] * AbsR[0][0];
+
+    rb =
+        b.half_extents[1] * AbsR[1][2] +
+        b.half_extents[2] * AbsR[1][1];
+
+    if (fabs(t[0] * R[2][0] - t[2] * R[0][0]) > ra + rb)
+        return false;
+
+
+    // L = A1 x B1
+    ra =
+        a.half_extents[0] * AbsR[2][1] +
+        a.half_extents[2] * AbsR[0][1];
+
+    rb =
+        b.half_extents[0] * AbsR[1][2] +
+        b.half_extents[2] * AbsR[1][0];
+
+    if (fabs(t[0] * R[2][1] - t[2] * R[0][1]) > ra + rb)
+        return false;
+
+
+    // L = A1 x B2
+    ra =
+        a.half_extents[0] * AbsR[2][2] +
+        a.half_extents[2] * AbsR[0][2];
+
+    rb =
+        b.half_extents[0] * AbsR[1][1] +
+        b.half_extents[1] * AbsR[1][0];
+
+    if (fabs(t[0] * R[2][2] - t[2] * R[0][2]) > ra + rb)
+        return false;
+
+
+    // L = A2 x B0
+    ra =
+        a.half_extents[0] * AbsR[1][0] +
+        a.half_extents[1] * AbsR[0][0];
+
+    rb =
+        b.half_extents[1] * AbsR[2][2] +
+        b.half_extents[2] * AbsR[2][1];
+
+    if (fabs(t[1] * R[0][0] - t[0] * R[1][0]) > ra + rb)
+        return false;
+
+
+    // L = A2 x B1
+    ra =
+        a.half_extents[0] * AbsR[1][1] +
+        a.half_extents[1] * AbsR[0][1];
+
+    rb =
+        b.half_extents[0] * AbsR[2][2] +
+        b.half_extents[2] * AbsR[2][0];
+
+    if (fabs(t[1] * R[0][1] - t[0] * R[1][1]) > ra + rb)
+        return false;
+
+
+    // L = A2 x B2
+    ra =
+        a.half_extents[0] * AbsR[1][2] +
+        a.half_extents[1] * AbsR[0][2];
+
+    rb =
+        b.half_extents[0] * AbsR[2][1] +
+        b.half_extents[1] * AbsR[2][0];
+
+    if (fabs(t[1] * R[0][2] - t[0] * R[1][2]) > ra + rb)
+        return false;
+
+
+    // No separating axis found
+    return true;
 }
 
 void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track)
 {
-	std::vector<Aabb> cars_aabbs;
+	std::vector<Obb> cars_obbs;
 
-    for (std::shared_ptr<Car> car : cars)
-    {
+    auto create_car_obb = [&](std::shared_ptr<Car> car) {
         glm::mat4 model_transform = Matrix_Translate(car->root->position.x, car->root->position.y, car->root->position.z)
             * Matrix_Rotate_X(glm::radians(car->root->rotation.x))
             * Matrix_Rotate_Y(glm::radians(car->root->rotation.y))
             * Matrix_Rotate_Z(glm::radians(car->root->rotation.z))
             * Matrix_Scale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
-
         std::shared_ptr<ObjModel> car_model = g_entities_virtual_scene_objs[car->GetId()].front()->model;
-        const glm::vec3& min = car_model->min_bounds;
-        const glm::vec3& max = car_model->max_bounds;
+        return CreateObb(*car_model, model_transform);
+		};
 
-        glm::vec3 corners[8] =
-        {
-            {min.x, min.y, min.z},
-            {max.x, min.y, min.z},
-            {min.x, max.y, min.z},
-            {max.x, max.y, min.z},
-            {min.x, min.y, max.z},
-            {max.x, min.y, max.z},
-            {min.x, max.y, max.z},
-            {max.x, max.y, max.z}
-        };
-
-        glm::vec3 new_min(FLT_MAX);
-        glm::vec3 new_max(-FLT_MAX);
-
-        for (int k = 0; k < 8; ++k)
-        {
-            glm::vec3 p = model_transform * glm::vec4(corners[k], 1.0f);
-
-            new_min = glm::min(new_min, p);
-            new_max = glm::max(new_max, p);
-        }
-
-        Aabb car_aabb = { new_min, new_max };
-
-        cars_aabbs.push_back(car_aabb);
+    for (std::shared_ptr<Car> car : cars)
+    {   
+		cars_obbs.push_back(create_car_obb(car));
     }
 
-    auto handle_same_lane_collision = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
-        car_behind->target_lane = car_behind->cur_lane >= track->lanes.size() - 1 ? car_behind->cur_lane - 1 : car_behind->cur_lane + 1;
+    auto handle_lane_switch = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
+        if(car_in_front->target_lane == car_behind->target_lane)
+        {
+            if(car_behind->target_lane != car_behind->cur_lane)
+            {
+                car_behind->lane_transitioning_length = std::max(g_lane_transitioning_length - car_behind->lane_transitioning_length, 0.0f);
+				std::swap(car_behind->target_lane, car_behind->cur_lane);
+                car_behind->cur_curve_pos = track->lanes[car_behind->cur_lane].at(car_behind->cur_curve_point);
+            }
+            else
+            {
+                car_behind->target_lane = car_behind->cur_lane >= track->lanes.size() - 1 ? car_behind->cur_lane - 1 : car_behind->cur_lane + 1;
+                car_behind->lane_transitioning_length = 0.0f;
+            }
+        }
 
         if (!car_in_front->is_out_of_control)
         {
@@ -2622,61 +2824,57 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
         }
         };
 
-    auto handle_lateral_collision = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
-        car_in_front->lane_transitioning_length = car_in_front->target_lane != car_in_front->cur_lane ? 
-            g_lane_transitioning_length - car_in_front->lane_transitioning_length : 0.0f;
-        car_in_front->target_lane = car_in_front->cur_lane;
-
-        car_behind->lane_transitioning_length = car_behind->target_lane != car_behind->cur_lane ?
-            g_lane_transitioning_length - car_behind->lane_transitioning_length : 0.0f;
-        car_behind->target_lane = car_behind->cur_lane;
-
-        if (!car_in_front->is_out_of_control)
+    auto handle_collision_overlap = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind)
         {
-            car_in_front->is_accelerating = false;
-            car_in_front->is_out_of_control = true;
-            car_in_front->out_of_control_timer = 0.0f;
-        }
+			glm::vec3 new_forward = glm::vec3(0.0f);
+
+			Obb car_in_front_obb = create_car_obb(car_in_front);
+			Obb car_behind_obb = create_car_obb(car_behind);
+
+			float temp_speed = car_in_front->speed;
+            while(Intersects(car_in_front_obb, car_behind_obb))
+            {
+                car_in_front->speed = 1.0f;
+                UpdateCarTransformOnTrack(0.01f, car_in_front, track);
+                car_in_front_obb = create_car_obb(car_in_front);
+            }
+
+			car_in_front->speed = temp_speed;
+			car_in_front->forward = new_forward;
         };
+
 
     for (int32_t i = 0; i < cars.size() - 1; ++i)
     {
         std::shared_ptr<Car> this_car = cars[i];
-        const Aabb& this_car_aabb = cars_aabbs[i];
+        const Obb& this_car_obb = cars_obbs[i];
 
         for (int32_t j = i + 1; j < cars.size(); ++j)
         {
             std::shared_ptr<Car> other_car = cars[j];
-            const Aabb& other_car_aabb = cars_aabbs[j];
+            const Obb& other_car_obb = cars_obbs[j];
 
             // if aabbs not overlap continue
-            if (!Intersects(this_car_aabb, other_car_aabb)) continue;
+            if (!Intersects(this_car_obb, other_car_obb)) continue;
 
 			const glm::vec3& this_car_pos = this_car->root->position;
-			const glm::vec3& this_car_forward = GetCarForwardVector(this_car, track);
 			const glm::vec3& other_car_pos = other_car->root->position;
-			const glm::vec3& other_car_forward = GetCarForwardVector(other_car, track);
 
 			const glm::vec3 diff_other_to_this = other_car_pos - this_car_pos;
 
-            if (this_car->cur_lane == other_car->cur_lane)
+            // if this car is behind
+            if (glm::dot(diff_other_to_this, this_car->forward) > 0.0f)
             {
-                // if this car is behind
-                if (glm::dot(diff_other_to_this, this_car_forward) > 0.0f)
-                    handle_same_lane_collision(other_car, this_car);
-                // if the other car is behind
-                else
-                    handle_same_lane_collision(this_car, other_car);
+                if (!this_car->is_out_of_control && !other_car->is_out_of_control)
+                    handle_lane_switch(other_car, this_car);
+                handle_collision_overlap(other_car, this_car);
             }
-            // if this car is touching the other's rear
-            else if (glm::dot(diff_other_to_this, this_car_forward) > 0.0f)
+            // if the other car is behind
+            else if (glm::dot(diff_other_to_this, other_car->forward) < 0.0f)
             {
-                handle_lateral_collision(other_car, this_car);
-            }
-            // if other car is touching this one's rear
-            else if (glm::dot(diff_other_to_this, other_car_forward) > 0.0f)
-            {
-                handle_lateral_collision(this_car, other_car);
+                if (!other_car->is_out_of_control && !this_car->is_out_of_control)
+                    handle_lane_switch(this_car, other_car);
+                handle_collision_overlap(this_car, other_car);
             }
         }
     }
@@ -2801,9 +2999,4 @@ float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::sha
     static constexpr float grip_limit = 32.0f;
 
     return lateral_accel / grip_limit;
-}
-
-glm::vec3 GetCarForwardVector(std::shared_ptr<Car> car, std::shared_ptr<Track> track)
-{
-	return track->lanes[car->cur_lane][((size_t)car->cur_curve_point + 1) % track->lanes[car->cur_lane].size()] - track->lanes[car->cur_lane][car->cur_curve_point];
 }
