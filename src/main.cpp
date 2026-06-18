@@ -229,7 +229,7 @@ bool g_is_on_game_start = true;
 bool g_is_playing_countdown = false;
 bool g_is_game_running = false;
 bool g_is_game_over = false;
-int32_t g_num_laps = 128;
+int32_t g_num_laps = 4;
 constexpr int32_t g_init_curve_point = 250;
 
 static constexpr float g_countdown_duration = 4.0f;
@@ -2374,6 +2374,18 @@ std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<Ob
 
 void UpdateCarTransformOnTrack(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
 {
+    if (car->cur_lane != car->target_lane)
+    {
+        car->lane_transitioning_length += car->speed * (float)delta_time;
+
+        if (car->lane_transitioning_length >= g_lane_transitioning_length)
+        {
+            car->cur_lane = car->target_lane;
+            car->lane_transitioning_length = 0.0f;
+            car->cur_curve_pos = car->transition_curve_pos;
+        }
+    }
+
     const auto& track_points = track->lanes[car->cur_lane];
     // Car animation path update
     int32_t next_point = (car->cur_curve_point + 1) % track_points.size();
@@ -2468,18 +2480,6 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
 
     car->speed = std::clamp(car->speed, 0.0f, max_car_speed * transitioning_lane_length);
-
-    if (car->cur_lane != car->target_lane)
-    {
-        car->lane_transitioning_length += car->speed * (float)delta_time;
-
-        if (car->lane_transitioning_length >= g_lane_transitioning_length)
-        {
-            car->cur_lane = car->target_lane;
-            car->lane_transitioning_length = 0.0f;
-            car->cur_curve_pos = car->transition_curve_pos;
-        }
-    }
 
     if (keys[car->input_keys.at(2)] && !car->is_out_of_control && car->cur_lane == car->target_lane)
     {
@@ -2826,21 +2826,18 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
 
     auto handle_collision_overlap = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind)
         {
-			glm::vec3 new_forward = glm::vec3(0.0f);
-
 			Obb car_in_front_obb = create_car_obb(car_in_front);
 			Obb car_behind_obb = create_car_obb(car_behind);
 
 			float temp_speed = car_in_front->speed;
             while(Intersects(car_in_front_obb, car_behind_obb))
             {
-                car_in_front->speed = 1.0f;
+                car_in_front->speed = car_behind->speed;
                 UpdateCarTransformOnTrack(0.01f, car_in_front, track);
                 car_in_front_obb = create_car_obb(car_in_front);
             }
 
 			car_in_front->speed = temp_speed;
-			car_in_front->forward = new_forward;
         };
 
 
@@ -2872,7 +2869,7 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
             // if the other car is behind
             else if (glm::dot(diff_other_to_this, other_car->forward) < 0.0f)
             {
-                if (!other_car->is_out_of_control && !this_car->is_out_of_control)
+                if (!this_car->is_out_of_control && !other_car->is_out_of_control)
                     handle_lane_switch(this_car, other_car);
                 handle_collision_overlap(this_car, other_car);
             }
