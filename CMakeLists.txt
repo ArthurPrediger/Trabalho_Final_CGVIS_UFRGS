@@ -23,6 +23,7 @@ set(HEADERS
   include/entity.h
   include/component.h
   include/curve_path_loader.h
+  include/matrix_operations.h
 )
 
 set(SHADERS

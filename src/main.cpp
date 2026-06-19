@@ -52,10 +52,10 @@
 
 // Headers locais, definidos na pasta "include/"
 #include "utils.h"
-#include "matrices.h"
 
 #include "entity.h"
 #include "curve_path_loader.h"
+#include "matrix_operations.h"
 
 constexpr int32_t max_int32 = std::numeric_limits<GLuint>::max();
 
@@ -451,7 +451,7 @@ int main(int argc, char* argv[])
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        glm::mat4 view = Matrix_Camera_View(camera_position, camera_forward, camera_up);
+        glm::mat4 view = matops::MatrixCameraView(camera_position, camera_forward, camera_up);
 
         // Agora computamos a matriz de Projeção.
         glm::mat4 projection;
@@ -464,7 +464,7 @@ int main(int argc, char* argv[])
         // Projeção Perspectiva.
         // Para definição do field of view (FOV), veja slides 205-215 do documento Aula_09_Projecoes.pdf.
         float field_of_view = 3.141592 / 3.0f;
-        projection = Matrix_Perspective(field_of_view, g_ScreenRatio, nearplane, farplane);
+        projection = matops::MatrixPerspective(field_of_view, g_ScreenRatio, nearplane, farplane);
 
         // Enviamos as matrizes "view" e "projection" para a placa de vídeo
         // (GPU). Veja o arquivo "shader_vertex.glsl", onde estas são
@@ -756,7 +756,7 @@ void ComputeNormals(std::shared_ptr<ObjModel> model)
                 const glm::vec4  b = vertices[1];
                 const glm::vec4  c = vertices[2];
 
-                const glm::vec4  n = crossproduct(b-a,c-a);
+                const glm::vec4  n = glm::vec4(glm::cross(glm::vec3(b-a),glm::vec3(c-a)), 0.0f);
 
                 for (size_t vertex = 0; vertex < 3; ++vertex)
                 {
@@ -776,7 +776,7 @@ void ComputeNormals(std::shared_ptr<ObjModel> model)
                 continue;
 
             glm::vec4 n = vertex_normals[vertex_index] / (float)num_triangles_per_vertex[vertex_index];
-            n /= norm(n);
+            n = glm::normalize(n);
 
             model->attrib.normals.push_back( n.x );
             model->attrib.normals.push_back( n.y );
@@ -1447,7 +1447,7 @@ void TextRendering_ShowModelViewProjection(
     glm::vec2 p = glm::vec2( 0,  0);
     glm::vec2 q = glm::vec2(width, height);
 
-    glm::mat4 viewport_mapping = Matrix(
+    glm::mat4 viewport_mapping = glm::mat4(
         (q.x - p.x)/(b.x-a.x), 0.0f, 0.0f, (b.x*p.x - a.x*q.x)/(b.x-a.x),
         0.0f, (q.y - p.y)/(b.y-a.y), 0.0f, (b.y*p.y - a.y*q.y)/(b.y-a.y),
         0.0f , 0.0f , 1.0f , 0.0f ,
@@ -2169,7 +2169,7 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
             std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
             const tinyobj::shape_t& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
 
-            glm::mat4 local_comp_transform_mat = Matrix_Identity();
+            glm::mat4 local_comp_transform_mat = matops::MatrixIdentity();
 
 			auto transform_components = scene_obj_comp->GetComponentsByType<TransformComp>();
 
@@ -2177,20 +2177,20 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
             {
                 glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
                 std::shared_ptr<TransformComp> transform_component = transform_components[0];
-                local_comp_transform_mat = Matrix_Translate(center.x, center.y, center.z)
-                    * Matrix_Translate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
-                    * Matrix_Rotate_Z(glm::radians(transform_component->rotation.z))
-                    * Matrix_Rotate_Y(glm::radians(transform_component->rotation.y))
-                    * Matrix_Rotate_X(glm::radians(transform_component->rotation.x))
-					* Matrix_Scale(transform_component->scale.x, transform_component->scale.y, transform_component->scale.z)
-                    * Matrix_Translate(-center.x, -center.y, -center.z);
+                local_comp_transform_mat = matops::MatrixTranslate(center.x, center.y, center.z)
+                    * matops::MatrixTranslate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
+                    * matops::MatrixRotateZ(glm::radians(transform_component->rotation.z))
+                    * matops::MatrixRotateY(glm::radians(transform_component->rotation.y))
+                    * matops::MatrixRotateX(glm::radians(transform_component->rotation.x))
+					* matops::MatrixScale(transform_component->scale.x, transform_component->scale.y, transform_component->scale.z)
+                    * matops::MatrixTranslate(-center.x, -center.y, -center.z);
             }
 
-            glm::mat4 model = Matrix_Translate(entity->root->position.x, entity->root->position.y, entity->root->position.z)
-                * Matrix_Rotate_X(glm::radians(entity->root->rotation.x))
-                * Matrix_Rotate_Y(glm::radians(entity->root->rotation.y))
-                * Matrix_Rotate_Z(glm::radians(entity->root->rotation.z))
-                * Matrix_Scale(entity->root->scale.x, entity->root->scale.y, entity->root->scale.z)
+            glm::mat4 model = matops::MatrixTranslate(entity->root->position.x, entity->root->position.y, entity->root->position.z)
+                * matops::MatrixRotateX(glm::radians(entity->root->rotation.x))
+                * matops::MatrixRotateY(glm::radians(entity->root->rotation.y))
+                * matops::MatrixRotateZ(glm::radians(entity->root->rotation.z))
+                * matops::MatrixScale(entity->root->scale.x, entity->root->scale.y, entity->root->scale.z)
                 * local_comp_transform_mat;
 
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
@@ -2446,8 +2446,8 @@ void UpdateCarTransformOnTrack(double delta_time, std::shared_ptr<Car> car, std:
 
     glm::vec3 car_world_rotation = { phi, theta, roll };
 
-    glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
-    model *= Matrix_Scale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
+    glm::mat4 model = matops::MatrixIdentity(); // Transformação identidade de modelagem
+    model *= matops::MatrixScale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
     glm::vec3 car_world_pos = model * glm::vec4(car->transition_curve_pos, 1.0f);
 
     car->root->position = car_world_pos;
@@ -2786,11 +2786,11 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
 	std::vector<Obb> cars_obbs;
 
     auto create_car_obb = [&](std::shared_ptr<Car> car) {
-        glm::mat4 model_transform = Matrix_Translate(car->root->position.x, car->root->position.y, car->root->position.z)
-            * Matrix_Rotate_X(glm::radians(car->root->rotation.x))
-            * Matrix_Rotate_Y(glm::radians(car->root->rotation.y))
-            * Matrix_Rotate_Z(glm::radians(car->root->rotation.z))
-            * Matrix_Scale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
+        glm::mat4 model_transform = matops::MatrixTranslate(car->root->position.x, car->root->position.y, car->root->position.z)
+            * matops::MatrixRotateX(glm::radians(car->root->rotation.x))
+            * matops::MatrixRotateY(glm::radians(car->root->rotation.y))
+            * matops::MatrixRotateZ(glm::radians(car->root->rotation.z))
+            * matops::MatrixScale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
         std::shared_ptr<ObjModel> car_model = g_entities_virtual_scene_objs[car->GetId()].front()->model;
         return CreateObb(*car_model, model_transform);
 		};
