@@ -230,7 +230,7 @@ bool g_is_playing_countdown = false;
 bool g_is_game_running = false;
 bool g_is_game_over = false;
 int32_t g_num_laps = 4;
-constexpr int32_t g_init_curve_point = 250;
+constexpr int32_t g_init_curve_point = 1025;
 
 static constexpr float g_countdown_duration = 4.0f;
 static float g_countdown_time = g_countdown_duration;
@@ -1980,14 +1980,11 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
     // Tunable parameters
     //------------------------------------------------------
 
-    //constexpr float fixed_yaw = glm::radians(-45.0f);
-    //constexpr float fixed_pitch = glm::radians(-35.0f);
-
-    float fixed_yaw = camera_yaw;
-    float fixed_pitch = camera_pitch;
+    constexpr float fixed_yaw = glm::radians(-45.0f);
+    constexpr float fixed_pitch = glm::radians(-35.0f);
 
     constexpr float min_distance = 6.0f;
-    constexpr float max_distance = 10.0f;
+    constexpr float max_distance = 14.0f;
     constexpr float zoom_factor = 2.4f;
 
     constexpr float follow_speed = 6.0f;
@@ -2086,13 +2083,13 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
 
 void UpdateCountdownCamera(float normalized_countdown_time)
 {
-    constexpr glm::vec4 init_camera_position = { 4.74f, 0.84f, -0.52f, 1.0f };
-    constexpr float init_camera_pitch = glm::radians<float>(-21.77);
-    constexpr float init_camera_yaw = glm::radians<float>(-275.35);
+    constexpr glm::vec4 init_camera_position = { 2.64f, 1.02f, 6.84f, 1.0f };
+    constexpr float init_camera_pitch = glm::radians<float>(-31.22);
+    constexpr float init_camera_yaw = glm::radians<float>(-40.15);
 
-    constexpr glm::vec4 end_camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
-    constexpr float end_camera_pitch = glm::radians<float>(-36.38);
-    constexpr float end_camera_yaw = glm::radians<float>(-212.90);
+    constexpr glm::vec4 end_camera_position =  { -0.68f, 4.81f, 11.71f, 1.0f };
+    constexpr float end_camera_pitch = glm::radians<float>(-23.48);
+    constexpr float end_camera_yaw = glm::radians<float>(-83.41);
 
     normalized_countdown_time = glm::clamp(normalized_countdown_time, 0.0f, 1.0f);
 
@@ -2883,7 +2880,7 @@ std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm:
 
     lanes.resize(num_lanes);
 
-    constexpr float lane_width = 3.0f;
+    constexpr float lane_width = 3.5f;
     const float track_width = (num_lanes - 1) * lane_width;
 
     for (int32_t l = 0; l < num_lanes; ++l)
