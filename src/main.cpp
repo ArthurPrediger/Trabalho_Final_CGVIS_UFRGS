@@ -257,6 +257,7 @@ bool g_show_info_text = true;
 GLuint g_GpuProgramID = 0;
 GLint g_model_uniform;
 GLint g_view_uniform;
+GLint g_camera_position_uniform;
 GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
@@ -349,6 +350,7 @@ int main(int argc, char* argv[])
     //
     LoadShadersFromFiles();
 
+    // Track model and entity
     std::shared_ptr<ObjModel> curve_model = std::make_shared<ObjModel>("../../data/curve/curve.obj");
     ComputeNormals(curve_model);
     BuildTrianglesAndBuffers(curve_model);
@@ -365,11 +367,45 @@ int main(int argc, char* argv[])
     track->lane_lengths = ComputeLaneLengths(track->lanes);
     track->normalized_lane_lengths = ComputeNormalizedLaneLengths(track->lanes);
 
+	// Finish line model and entity
+	std::shared_ptr<ObjModel> finish_line_model = std::make_shared<ObjModel>("../../data/finish_line/finish_line.obj");
+    ComputeNormals(finish_line_model);
+    BuildTrianglesAndBuffers(finish_line_model);
+	g_loaded_models.emplace(finish_line_model->filepath, finish_line_model);
+
+	std::shared_ptr<Entity> finish_line = std::make_shared<Entity>("finish_line");
+	finish_line->AddComponents(CreateMeshComponentsForModelByName(finish_line_model->filepath));
+	g_entities_virtual_meshes.emplace(finish_line->GetId(), finish_line->GetComponentsByType<MeshComp>());
+    glm::mat4 model = matops::MatrixIdentity(); // Transformação identidade de modelagem
+    model *= matops::MatrixScale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
+	finish_line->root->position = model * glm::vec4(curve_points[(g_init_curve_point + 10) % curve_points.size()], 1.0f);
+	finish_line->root->position.y += 0.01f;
+	finish_line->root->rotation = { 0.0, 82.0f, 0.0f };
+	finish_line->root->scale = { 1.0f, 1.0f, 0.2f };
+
+    // Finish line model and entity
+    std::shared_ptr<ObjModel> ground_model = std::make_shared<ObjModel>("../../data/ground/ground.obj");
+    ComputeNormals(ground_model);
+    BuildTrianglesAndBuffers(ground_model);
+    g_loaded_models.emplace(ground_model->filepath, ground_model);
+
+    std::shared_ptr<Entity> ground = std::make_shared<Entity>("ground");
+    ground->AddComponents(CreateMeshComponentsForModelByName(ground_model->filepath));
+    g_entities_virtual_meshes.emplace(ground->GetId(), ground->GetComponentsByType<MeshComp>());
+    ground->root->position = track->root->position + glm::vec3(0.0f, curve_points[0].y * track->root->scale.y - 0.01, 0.0f);
+	ground->root->scale = { 90.0f, 90.0f, 90.0f };
+
+    // Car model and entities
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
     ComputeNormals(car_zr1_model);
     DivideModelMeshesByMaterial(car_zr1_model);
     BuildTrianglesAndBuffers(car_zr1_model);
     g_loaded_models.emplace(car_zr1_model->filepath, car_zr1_model);
+
+	std::vector<std::shared_ptr<Car>> cars = { 
+        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }, { 0.53, 0.13, 0.11 }),
+        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.34, 0.063 }),
+    };
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -383,11 +419,6 @@ int main(int argc, char* argv[])
     glFrontFace(GL_CCW);
 
     glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
-
-	std::vector<std::shared_ptr<Car>> cars = { 
-        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }, { 0.53, 0.13, 0.11 }),
-        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.34, 0.063 }),
-    };
 
     RestartGame(cars, track);
 
@@ -433,7 +464,8 @@ int main(int argc, char* argv[])
         // Conversaremos sobre sistemas de cores nas aulas de Modelos de Iluminação.
         //
         //           R     G     B     A
-        glClearColor(0.9f, 0.9f, 1.0f, 1.0f);
+		float gray_value = powf(0.65f, 1.0f / 2.2f);
+        glClearColor(gray_value, gray_value, gray_value, 1.0f);
 
         // "Pintamos" todos os pixels do framebuffer com a cor definida acima,
         // e também resetamos todos os pixels do Z-buffer (depth buffer).
@@ -471,9 +503,14 @@ int main(int argc, char* argv[])
         // efetivamente aplicadas em todos os pontos.
         glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
+        glUniform3f(g_camera_position_uniform, camera_position.x, camera_position.y, camera_position.z);
 
+        // Desenhamos o chão
+        DrawEntity(ground);
         // Desenhamos a pista
 		DrawEntity(track);
+        // Desenhamos a linha de chegada
+		DrawEntity(finish_line);
 
         // Desenhamos os carros
         for (std::shared_ptr<Car> car : cars)
@@ -584,8 +621,8 @@ GLuint LoadTextureImage(const char* filename)
     glGenerateMipmap(GL_TEXTURE_2D);
 
     // Texture parameters directly on the texture object (simpler for most cases)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -669,6 +706,7 @@ void LoadShadersFromFiles()
     g_model_uniform       = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
     g_view_uniform        = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
     g_projection_uniform  = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
+	g_camera_position_uniform = glGetUniformLocation(g_GpuProgramID, "camera_position"); // Variável da posição da câmera em shader_fragment.glsl
     g_object_id_uniform   = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
     g_bbox_min_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_max");
@@ -2507,9 +2545,9 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     // Car wheels animation update
     for (int32_t i = 0; i < car->wheels_mesh_comps.size(); ++i)
     {
-        std::shared_ptr<MeshComp> scene_obj_comp = car->wheels_mesh_comps[i];
+        std::shared_ptr<MeshComp> mesh_comp = car->wheels_mesh_comps[i];
         std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
-        float radius = (scene_obj_comp->bbox_max.y - scene_obj_comp->bbox_min.y) * 0.5f * car->root->scale.y;
+        float radius = (mesh_comp->bbox_max.y - mesh_comp->bbox_min.y) * 0.5f * car->root->scale.y;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
         wheel_transform_comp->rotation.y = 35.0f * left_right_rotation_factor;
     }

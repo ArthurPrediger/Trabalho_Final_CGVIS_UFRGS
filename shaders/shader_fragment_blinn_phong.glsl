@@ -7,6 +7,7 @@ in vec2 texcoords;
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform vec3 camera_position;
 
 uniform vec4 bbox_min;
 uniform vec4 bbox_max;
@@ -76,11 +77,13 @@ void main()
     vec3 emissive = has_ke_texture ? texture(texture_sampler_ke, texcoords).rgb * ke : ke;
 
     // Final lighting
-    vec3 final_color =
-        ambient +
-        diffuse +
-        specular +
-        emissive;
+    vec3 final_lighting_color = ambient + diffuse + specular + emissive;
+
+    float frag_to_camera_distance = min(pow(length(position_world - camera_position) / 85.0, 2), 1.0);
+	vec3 fog_color = vec3(0.65, 0.65, 0.65);
+	float fatm = 1.0 - frag_to_camera_distance;
+
+	vec3 final_color = final_lighting_color * fatm + (1.0 - fatm) * fog_color;
 
     // Gamma correction
     final_color = pow(final_color, vec3(1.0 / 2.2));

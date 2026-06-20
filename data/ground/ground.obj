@@ -1,0 +1,16 @@
+mtllib ground.mtl
+g the_plane
+
+v -1 0 1
+v 1 0 1
+v 1 0 -1
+v -1 0 -1
+
+vt 0 0
+vt 90 0
+vt 90 90
+vt 0 90
+
+usemtl ground_material
+f 1/1 2/2 3/3
+f 1/1 3/3 4/4
