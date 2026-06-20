@@ -66,17 +66,27 @@ public:
 	glm::vec3 rotation = { 0, 0, 0 };
 };
 
+struct Material
+{
+	std::string name;
+	glm::vec3 albedo;
+	glm::vec3 specular;
+	glm::vec3 emissive;
+	float shininess;
+	float opacity;
+};
+
 // Definimos uma estrutura que armazenará dados necessários para renderizar
 // cada objeto da cena virtual.
-class SceneObjectComp : public Component
+class MeshComp : public Component
 {
 public:
-	SceneObjectComp(const std::string& name = "");
+	MeshComp(const std::string& name = "");
 
 	static std::string GetComponentType() { return "SceneObjectComp"; };
 
 public:
-	std::string  object_name;        // Nome do objeto
+	std::string  mesh_name;        // Nome do objeto
 	size_t       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
 	size_t       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
 	GLenum       rendering_mode; // Modo de rasterização (GL_TRIANGLES, GL_TRIANGLE_STRIP, etc.)
@@ -86,4 +96,6 @@ public:
 
 	std::shared_ptr<class ObjModel>  model;
 	uint32_t submesh_index;     // Índice do submesh dentro do modelo 3D (objeto do tipo ObjModel, definido em objloader.h)
+
+	Material material;
 };

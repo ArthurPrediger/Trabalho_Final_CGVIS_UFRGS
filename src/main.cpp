@@ -103,7 +103,7 @@ void ComputeNormals(std::shared_ptr<ObjModel> model); // Computa normais de um O
 void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model);
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
 GLuint LoadTextureImage(const char* filename); // Função que carrega imagens de textura
-void DrawVirtualObject(std::shared_ptr<SceneObjectComp> virtual_scene_obj_component); // Desenha um objeto armazenado em g_VirtualScene
+void DrawVirtualMesh(std::shared_ptr<MeshComp> virtual_mesh_component); // Desenha uma um componente de malha 
 GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
 void LoadShader(const char* filename, GLuint shader_id); // Função utilizada pelas duas acima
@@ -148,7 +148,7 @@ public:
     glm::vec3 forward = glm::vec3(0.0f);
 	float speed;
 	std::array<int32_t, 4> input_keys;
-    std::vector<std::shared_ptr<SceneObjectComp>> wheels_scene_obj_comps;
+    std::vector<std::shared_ptr<MeshComp>> wheels_mesh_comps;
     std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps;
     int32_t cur_curve_point;
     glm::vec3 cur_curve_pos;
@@ -182,8 +182,8 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
 void UpdateCountdownCamera(float normalized_countdown_time);
 void DrawEntity(const std::shared_ptr<Entity> entity);
 void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars);
-std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name);
-std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys);
+std::vector<std::shared_ptr<MeshComp>> CreateMeshComponentsForModelByName(const std::string& model_name);
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys, glm::vec3 color = { 0, 0, 0 });
 void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track);
 std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
@@ -199,7 +199,7 @@ float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::sha
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
 std::unordered_map<std::string, std::shared_ptr<ObjModel>> g_loaded_models;
-std::unordered_map<uint32_t, std::vector<std::shared_ptr<SceneObjectComp>>> g_entities_virtual_scene_objs;
+std::unordered_map<uint32_t, std::vector<std::shared_ptr<MeshComp>>> g_entities_virtual_meshes;
 
 // Pilha que guardará as matrizes de modelagem.
 //std::stack<glm::mat4>  g_MatrixStack;
@@ -230,7 +230,7 @@ bool g_is_playing_countdown = false;
 bool g_is_game_running = false;
 bool g_is_game_over = false;
 int32_t g_num_laps = 4;
-constexpr int32_t g_init_curve_point = 1025;
+constexpr int32_t g_init_curve_point = 775;
 
 static constexpr float g_countdown_duration = 4.0f;
 static float g_countdown_time = g_countdown_duration;
@@ -355,8 +355,8 @@ int main(int argc, char* argv[])
 	g_loaded_models.emplace(curve_model->filepath, curve_model);
 
     std::shared_ptr<Track> track = std::make_shared<Track>("track");
-    track->AddComponents(CreateSceneObjectComponentsForModelByName(curve_model->filepath));
-    g_entities_virtual_scene_objs.emplace(track->GetId(), track->GetComponentsByType<SceneObjectComp>());
+    track->AddComponents(CreateMeshComponentsForModelByName(curve_model->filepath));
+    g_entities_virtual_meshes.emplace(track->GetId(), track->GetComponentsByType<MeshComp>());
     track->root->scale = { 0.25f, 0.25f, 0.25f };
 
     std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
@@ -385,8 +385,8 @@ int main(int argc, char* argv[])
     glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
 
 	std::vector<std::shared_ptr<Car>> cars = { 
-        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }),
-        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }),
+        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }, { 0.53, 0.13, 0.11 }),
+        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.34, 0.063 }),
     };
 
     RestartGame(cars, track);
@@ -598,7 +598,7 @@ GLuint LoadTextureImage(const char* filename)
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
 // dos objetos na função BuildTrianglesAndAddToVirtualScene().
-void DrawVirtualObject(std::shared_ptr<SceneObjectComp> virtual_scene_obj_component)
+void DrawVirtualMesh(std::shared_ptr<MeshComp> virtual_scene_obj_component)
 {
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
@@ -1980,7 +1980,7 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
     // Tunable parameters
     //------------------------------------------------------
 
-    constexpr float fixed_yaw = glm::radians(-45.0f);
+    constexpr float fixed_yaw = glm::radians(-75.0f);
     constexpr float fixed_pitch = glm::radians(-35.0f);
 
     constexpr float min_distance = 6.0f;
@@ -2083,13 +2083,13 @@ void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>
 
 void UpdateCountdownCamera(float normalized_countdown_time)
 {
-    constexpr glm::vec4 init_camera_position = { 2.64f, 1.02f, 6.84f, 1.0f };
-    constexpr float init_camera_pitch = glm::radians<float>(-31.22);
-    constexpr float init_camera_yaw = glm::radians<float>(-40.15);
+    constexpr glm::vec4 init_camera_position = { 1.62f, 0.52f, 8.88f, 1.0f };
+    constexpr float init_camera_pitch = glm::radians<float>(-20.91);
+    constexpr float init_camera_yaw = glm::radians<float>(-24.11);
 
-    constexpr glm::vec4 end_camera_position =  { -0.68f, 4.81f, 11.71f, 1.0f };
-    constexpr float end_camera_pitch = glm::radians<float>(-23.48);
-    constexpr float end_camera_yaw = glm::radians<float>(-83.41);
+    constexpr glm::vec4 end_camera_position = { -1.41f, 3.94f, 14.43f, 1.0f };
+    constexpr float end_camera_pitch = glm::radians<float>(-12.6);
+    constexpr float end_camera_yaw = glm::radians<float>(-79.4);
 
     normalized_countdown_time = glm::clamp(normalized_countdown_time, 0.0f, 1.0f);
 
@@ -2157,22 +2157,22 @@ void UpdateCountdownCamera(float normalized_countdown_time)
 
 void DrawEntity(const std::shared_ptr<Entity> entity)
 {
-    const std::vector<std::shared_ptr<SceneObjectComp>>& scene_obj_components = g_entities_virtual_scene_objs[entity->GetId()];
+    const std::vector<std::shared_ptr<MeshComp>>& mesh_components = g_entities_virtual_meshes[entity->GetId()];
 
-    if (scene_obj_components.empty()) return;
+    if (mesh_components.empty()) return;
 
-    auto draw_shape = [&](std::shared_ptr<SceneObjectComp> scene_obj_comp)
+    auto draw_shape = [&](std::shared_ptr<MeshComp> mesh_comp)
         {
-            std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
-            const tinyobj::shape_t& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+            std::shared_ptr<ObjModel> model_to_draw = mesh_comp->model;
+            const tinyobj::shape_t& shape = model_to_draw->shapes[mesh_comp->submesh_index];
 
             glm::mat4 local_comp_transform_mat = matops::MatrixIdentity();
 
-			auto transform_components = scene_obj_comp->GetComponentsByType<TransformComp>();
+			auto transform_components = mesh_comp->GetComponentsByType<TransformComp>();
 
             if (!transform_components.empty())
             {
-                glm::vec3 center = (scene_obj_comp->bbox_min + scene_obj_comp->bbox_max) / 2.0f;
+                glm::vec3 center = (mesh_comp->bbox_min + mesh_comp->bbox_max) / 2.0f;
                 std::shared_ptr<TransformComp> transform_component = transform_components[0];
                 local_comp_transform_mat = matops::MatrixTranslate(center.x, center.y, center.z)
                     * matops::MatrixTranslate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
@@ -2239,27 +2239,27 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
 
-            const auto& mat = model_to_draw->materials[material_idx];
-            glUniform3f(g_kd_uniform, mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
+            const auto& mat = mesh_comp->material;
+            glUniform3f(g_kd_uniform, mat.albedo[0], mat.albedo[1], mat.albedo[2]);
             glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
-            glUniform3f(g_ke_uniform, mat.emission[0], mat.emission[1], mat.emission[2]);
+            glUniform3f(g_ke_uniform, mat.emissive[0], mat.emissive[1], mat.emissive[2]);
             glUniform1f(g_ns_uniform, mat.shininess);
-            glUniform1f(g_opacity_uniform, mat.dissolve);
+            glUniform1f(g_opacity_uniform, mat.opacity);
 
-            DrawVirtualObject(scene_obj_comp);
+            DrawVirtualMesh(mesh_comp);
         };
 
     //std::map<float, const tinyobj::shape_t*> transparent_shapes;
-    std::vector<std::shared_ptr<SceneObjectComp>> transparent_objects;
+    std::vector<std::shared_ptr<MeshComp>> transparent_objects;
 
     // OPAQUE PASS
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
 
-    for (const auto& scene_obj_comp : scene_obj_components)
+    for (const auto& mesh_comp : mesh_components)
     {
-        std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
-		const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+        std::shared_ptr<ObjModel> model_to_draw = mesh_comp->model;
+		const auto& shape = model_to_draw->shapes[mesh_comp->submesh_index];
 
         int material_idx = shape.mesh.material_ids[0];
         const auto& mat = model_to_draw->materials[material_idx];
@@ -2268,11 +2268,11 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
             (textures_ids_it != model_to_draw->textures_ids.end() && textures_ids_it->second.opacity_id != max_int32);
         if (is_transparent)
         {
-            transparent_objects.push_back(scene_obj_comp);
+            transparent_objects.push_back(mesh_comp);
         }
         else
         {
-            draw_shape(scene_obj_comp);
+            draw_shape(mesh_comp);
         }
     }
 
@@ -2280,7 +2280,7 @@ void DrawEntity(const std::shared_ptr<Entity> entity)
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
 
-    for (const auto& scene_obj_comp : scene_obj_components)
+    for (const auto& scene_obj_comp : mesh_components)
     {
         std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
         const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
@@ -2315,9 +2315,9 @@ void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_p
     }
 }
 
-std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForModelByName(const std::string& model_name)
+std::vector<std::shared_ptr<MeshComp>> CreateMeshComponentsForModelByName(const std::string& model_name)
 {
-	std::vector<std::shared_ptr<SceneObjectComp>> result;
+	std::vector<std::shared_ptr<MeshComp>> result;
 
     auto it = g_loaded_models.find(model_name);
 
@@ -2327,42 +2327,55 @@ std::vector<std::shared_ptr<SceneObjectComp>> CreateSceneObjectComponentsForMode
 
     for(int32_t shape_index = 0; shape_index < model->shapes.size(); ++shape_index)
     {
-        std::shared_ptr<SceneObjectComp> scene_object = std::make_shared<SceneObjectComp>();
-        scene_object->object_name = model->shapes[shape_index].name;
-        scene_object->first_index    = model->first_indices[shape_index]; // Primeiro índice
-        scene_object->num_indices    = model->num_indices[shape_index]; // Número de indices
-        scene_object->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        scene_object->vertex_array_object_id = model->vertex_array_object_ids[shape_index];
+        std::shared_ptr<MeshComp> mesh_comp = std::make_shared<MeshComp>();
+        mesh_comp->mesh_name = model->shapes[shape_index].name;
+        mesh_comp->first_index    = model->first_indices[shape_index]; // Primeiro índice
+        mesh_comp->num_indices    = model->num_indices[shape_index]; // Número de indices
+        mesh_comp->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
+        mesh_comp->vertex_array_object_id = model->vertex_array_object_ids[shape_index];
 
-        scene_object->bbox_min = model->bboxes_min[shape_index];;
-        scene_object->bbox_max = model->bboxes_max[shape_index];;
+        mesh_comp->bbox_min = model->bboxes_min[shape_index];;
+        mesh_comp->bbox_max = model->bboxes_max[shape_index];;
 
-        scene_object->model = model;
-        scene_object->submesh_index = shape_index;
+        mesh_comp->model = model;
+        mesh_comp->submesh_index = shape_index;
 
-		result.push_back(scene_object);
+        tinyobj::material_t shape_mat = model->materials[model->shapes[shape_index].mesh.material_ids[0]];
+
+        mesh_comp->name = shape_mat.name;
+		mesh_comp->material.albedo = { shape_mat.diffuse[0], shape_mat.diffuse[1], shape_mat.diffuse[2] };
+		mesh_comp->material.specular = { shape_mat.specular[0], shape_mat.specular[1], shape_mat.specular[2] };
+		mesh_comp->material.emissive = { shape_mat.emission[0], shape_mat.emission[1], shape_mat.emission[2] };
+		mesh_comp->material.shininess = shape_mat.shininess;
+		mesh_comp->material.opacity = shape_mat.dissolve;
+
+		result.push_back(mesh_comp);
 	}
 
     return result;
 }
 
-std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys)
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys, glm::vec3 color)
 {
     std::shared_ptr<Car> car = std::make_shared<Car>(name);
-    car->AddComponents(CreateSceneObjectComponentsForModelByName(model->filepath));
-    g_entities_virtual_scene_objs.emplace(car->GetId(), car->GetComponentsByType<SceneObjectComp>());
+    car->AddComponents(CreateMeshComponentsForModelByName(model->filepath));
+    g_entities_virtual_meshes.emplace(car->GetId(), car->GetComponentsByType<MeshComp>());
     car->root->scale = { 0.25f, 0.25f, 0.25f };
 
     car->input_keys = input_keys;
-    car->wheels_scene_obj_comps = {};
+    car->wheels_mesh_comps = {};
     car->wheels_transform_comps = {};
 
-    for (std::shared_ptr<SceneObjectComp> scene_obj_comp : car->GetComponentsByType<SceneObjectComp>())
+    for (std::shared_ptr<MeshComp> mesh_comp : car->GetComponentsByType<MeshComp>())
     {
-        if (scene_obj_comp->model->shapes[scene_obj_comp->submesh_index].name.find("Wheel.") != std::string::npos)
+        if (mesh_comp->mesh_name.find("Wheel.") != std::string::npos)
         {
-            car->wheels_transform_comps.push_back(scene_obj_comp->AttachComponent<TransformComp>());
-            car->wheels_scene_obj_comps.push_back(scene_obj_comp);
+            car->wheels_transform_comps.push_back(mesh_comp->AttachComponent<TransformComp>());
+            car->wheels_mesh_comps.push_back(mesh_comp);
+        }
+        if (mesh_comp->mesh_name.find("_23") != std::string::npos)
+        {
+            mesh_comp->material.albedo = color;
         }
     }
 
@@ -2492,9 +2505,9 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
 
     // Car wheels animation update
-    for (int32_t i = 0; i < car->wheels_scene_obj_comps.size(); ++i)
+    for (int32_t i = 0; i < car->wheels_mesh_comps.size(); ++i)
     {
-        std::shared_ptr<SceneObjectComp> scene_obj_comp = car->wheels_scene_obj_comps[i];
+        std::shared_ptr<MeshComp> scene_obj_comp = car->wheels_mesh_comps[i];
         std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
         float radius = (scene_obj_comp->bbox_max.y - scene_obj_comp->bbox_min.y) * 0.5f * car->root->scale.y;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
@@ -2788,7 +2801,7 @@ void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars
             * matops::MatrixRotateY(glm::radians(car->root->rotation.y))
             * matops::MatrixRotateZ(glm::radians(car->root->rotation.z))
             * matops::MatrixScale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
-        std::shared_ptr<ObjModel> car_model = g_entities_virtual_scene_objs[car->GetId()].front()->model;
+        std::shared_ptr<ObjModel> car_model = g_entities_virtual_meshes[car->GetId()].front()->model;
         return CreateObb(*car_model, model_transform);
 		};
 

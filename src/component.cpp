@@ -21,7 +21,7 @@ TransformComp::TransformComp(const std::string& name)
 {
 }
 
-SceneObjectComp::SceneObjectComp(const std::string& name)
+MeshComp::MeshComp(const std::string& name)
 	:
 	Component(GetComponentType(), name)
 {
