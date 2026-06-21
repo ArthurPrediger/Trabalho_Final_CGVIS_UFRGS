@@ -27,6 +27,7 @@ set(HEADERS
 )
 
 set(SHADERS
+  shaders/shader_fragment_semi_pbr.glsl
   shaders/shader_fragment_blinn_phong.glsl
   shaders/shader_fragment.glsl
   shaders/shader_vertex.glsl

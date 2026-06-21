@@ -404,7 +404,7 @@ int main(int argc, char* argv[])
 
 	std::vector<std::shared_ptr<Car>> cars = { 
         CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }, { 0.53, 0.13, 0.11 }),
-        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.34, 0.063 }),
+        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.44, 0.063 }),
     };
 
     // Inicializamos o código para renderização de texto.
@@ -691,7 +691,8 @@ void LoadShadersFromFiles()
     //
     GLuint vertex_shader_id = LoadShader_Vertex("../../shaders/shader_vertex.glsl");
     //GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment.glsl");
-    GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment_blinn_phong.glsl");
+    //GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment_blinn_phong.glsl");
+    GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment_semi_pbr.glsl");
 
     // Deletamos o programa de GPU anterior, caso ele exista.
     if ( g_GpuProgramID != 0 )
@@ -2380,7 +2381,7 @@ std::vector<std::shared_ptr<MeshComp>> CreateMeshComponentsForModelByName(const 
 
         tinyobj::material_t shape_mat = model->materials[model->shapes[shape_index].mesh.material_ids[0]];
 
-        mesh_comp->name = shape_mat.name;
+        mesh_comp->material.name = shape_mat.name;
 		mesh_comp->material.albedo = { shape_mat.diffuse[0], shape_mat.diffuse[1], shape_mat.diffuse[2] };
 		mesh_comp->material.specular = { shape_mat.specular[0], shape_mat.specular[1], shape_mat.specular[2] };
 		mesh_comp->material.emissive = { shape_mat.emission[0], shape_mat.emission[1], shape_mat.emission[2] };

@@ -1,7 +1,8 @@
 newmtl ground_material
 illum 2
-Ns 10.0
+Ns 3.0
 Kd 1.000000 1.000000 1.000000
 Ka 1.000000 1.000000 1.000000
-Ks 0.050000 0.050000 0.050000
+Ks 0.015000 0.015000 0.015000
+d 1.0
 map_Kd rocky_terrain_02_diff_1k.jpg
