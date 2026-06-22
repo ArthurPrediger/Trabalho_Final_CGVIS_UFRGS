@@ -417,17 +417,20 @@ int main(int argc, char* argv[])
         { -25.0, -45.0 }, { -22.0, -31.0 }, { -29.0 , -63.0 }, { -5.0 , -76.0 },
         { 43.0, -6.0 }, { -6.0, -14.0 }, { -17.0 , 1.0 }, { -21.0 , -11.0 },
         { 26.0, 8.0 }, { 27.0, -8.0 }, { 39.0 , -15.0 }, { -32.0 , -9.0 },
-        { 33.0, 0.0 }, { -3.0, 15.5 }, { 4.0, 14.0 }, { -10.0, 2.0 }
+        { 33.0, 0.0 }, { -5.0, 14 }, { 4.0, 16.0 }, { -10.0, 2.0 }
     };
 
     std::random_device rd;
     std::mt19937 rng(rd()); // Mersenne Twister engine
     std::uniform_real_distribution<float> tree_rot_dist(0.0f, 360.0f);
+    std::uniform_real_distribution<float> tree_scale_dist(0.6f, 0.85f);
 
     std::vector<float> trees_rotations; trees_rotations.reserve(trees_positions.size());
+    std::vector<float> trees_scales; trees_scales.reserve(trees_positions.size());
     for (int32_t i = 0; i < trees_positions.size(); ++i)
     {
         trees_rotations.push_back(tree_rot_dist(rng));
+		trees_scales.push_back(tree_scale_dist(rng));
     }
 
     // Car model and entities
@@ -479,8 +482,8 @@ int main(int argc, char* argv[])
         // INPUTS UPDATE
         if (g_is_game_running)
         {
-            //UpdateFreeCamera(delta_time);
-            UpdateRaceCamera(delta_time, cars);
+            UpdateFreeCamera(delta_time);
+            //UpdateRaceCamera(delta_time, cars);
 
             // Cars movement and animation updates based on user input
 			for (std::shared_ptr<Car> car : cars)
@@ -552,6 +555,8 @@ int main(int argc, char* argv[])
             tree->root->position.x = trees_positions[i].x;
             tree->root->position.z = trees_positions[i].y;
 			tree->root->rotation.y = trees_rotations[i];
+			float scale = trees_scales[i];
+			tree->root->scale = { scale, scale, scale };
             DrawEntity(tree);
         }
 
@@ -2593,7 +2598,8 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
         std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
         float radius = (mesh_comp->bbox_max.y - mesh_comp->bbox_min.y) * 0.5f * car->root->scale.y;
         wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
-        wheel_transform_comp->rotation.y = 35.0f * left_right_rotation_factor;
+        if(mesh_comp->mesh_name.find("Ft") != std::string::npos)
+            wheel_transform_comp->rotation.y = 35.0f * left_right_rotation_factor;
     }
 
 	// Car destabilization update
