@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <format>
+#include <random>
 
 // Headers das bibliotecas OpenGL
 #include <glad/glad.h>   // Criação de contexto OpenGL 3.3
@@ -395,6 +396,40 @@ int main(int argc, char* argv[])
     ground->root->position = track->root->position + glm::vec3(0.0f, curve_points[0].y * track->root->scale.y - 0.01, 0.0f);
 	ground->root->scale = { 90.0f, 90.0f, 90.0f };
 
+	// Tree model and entity
+	std::shared_ptr<ObjModel> tree_model = std::make_shared<ObjModel>("../../data/tree/tree.obj");
+	ComputeNormals(tree_model);
+	BuildTrianglesAndBuffers(tree_model);
+	g_loaded_models.emplace(tree_model->filepath, tree_model);
+
+	std::shared_ptr<Entity> tree = std::make_shared<Entity>("tree");
+	tree->AddComponents(CreateMeshComponentsForModelByName(tree_model->filepath));
+	g_entities_virtual_meshes.emplace(tree->GetId(), tree->GetComponentsByType<MeshComp>());
+	tree->root->position = glm::vec3(0.0f, curve_points[0].y * track->root->scale.y - 0.01, 0.0f);
+	tree->root->scale = { 0.75f, 0.75f, 0.75f };
+
+    std::vector<glm::vec2> trees_positions = {
+        { -10.0, -5.0 }, { 6.0, -9.0 }, { -2.0 , -12.0 }, { 11.0 , -4.0 },
+        { 14.0, 1.0 }, { 16.0, -8.0 }, { -10.0 , -18.0 }, { 17.0 , 4.0 },
+        { 11.0, 11.0 }, { 6.0, -18.0 }, { -3.0 , -33.0 }, { -8.0 , -29.0 },
+        { 12.0, -35.0 }, { 2.0, -40.0 }, { -9.0 , -49.0 }, { 0.0 , -54.0 },
+        { 18.0, -28.0 }, { 27.0, -19.0 }, { 23.0 , -46.0 }, { 8.0 , -60.0 },
+        { -25.0, -45.0 }, { -22.0, -31.0 }, { -29.0 , -63.0 }, { -5.0 , -76.0 },
+        { 43.0, -6.0 }, { -6.0, -14.0 }, { -17.0 , 1.0 }, { -21.0 , -11.0 },
+        { 26.0, 8.0 }, { 27.0, -8.0 }, { 39.0 , -15.0 }, { -32.0 , -9.0 },
+        { 33.0, 0.0 }, { -3.0, 15.5 }, { 4.0, 14.0 }, { -10.0, 2.0 }
+    };
+
+    std::random_device rd;
+    std::mt19937 rng(rd()); // Mersenne Twister engine
+    std::uniform_real_distribution<float> tree_rot_dist(0.0f, 360.0f);
+
+    std::vector<float> trees_rotations; trees_rotations.reserve(trees_positions.size());
+    for (int32_t i = 0; i < trees_positions.size(); ++i)
+    {
+        trees_rotations.push_back(tree_rot_dist(rng));
+    }
+
     // Car model and entities
     std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
     ComputeNormals(car_zr1_model);
@@ -511,6 +546,14 @@ int main(int argc, char* argv[])
 		DrawEntity(track);
         // Desenhamos a linha de chegada
 		DrawEntity(finish_line);
+        // Desenhamos as árvores
+        for(int32_t i = 0; i < trees_positions.size(); ++i)
+        {
+            tree->root->position.x = trees_positions[i].x;
+            tree->root->position.z = trees_positions[i].y;
+			tree->root->rotation.y = trees_rotations[i];
+            DrawEntity(tree);
+        }
 
         // Desenhamos os carros
         for (std::shared_ptr<Car> car : cars)
