@@ -307,7 +307,7 @@ int main(int argc, char* argv[])
     // Criamos uma janela do sistema operacional, com 800 colunas e 600 linhas
     // de pixels, e com título "INF01047 ...".
     GLFWwindow* window;
-    window = glfwCreateWindow(800, 600, "INF01047 - Seu Cartao - Seu Nome", NULL, NULL);
+    window = glfwCreateWindow(800, 600, "INF01047 - 00334521 - Arthur Rambo Prediger", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -482,8 +482,8 @@ int main(int argc, char* argv[])
         // INPUTS UPDATE
         if (g_is_game_running)
         {
-            UpdateFreeCamera(delta_time);
-            //UpdateRaceCamera(delta_time, cars);
+            //UpdateFreeCamera(delta_time);
+            UpdateRaceCamera(delta_time, cars);
 
             // Cars movement and animation updates based on user input
 			for (std::shared_ptr<Car> car : cars)
@@ -602,10 +602,10 @@ int main(int argc, char* argv[])
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
-        TextRendering_ShowEulerAngles(window);
+        //TextRendering_ShowEulerAngles(window);
 
         // Imprimimos na informação sobre a matriz de projeção sendo utilizada.
-        TextRendering_ShowProjection(window);
+        //TextRendering_ShowProjection(window);
 
         // Imprimimos na tela informação sobre o número de quadros renderizados
         // por segundo (frames per second).
