@@ -20,7 +20,30 @@ IAs generativas foram utilizadas no desenvolvimento de funcionalidades e aspecto
 
 4. Imagens
 
+<img width="1364" height="694" alt="image" src="game_images/image_menu.png" />
+
+<img width="1364" height="694" alt="image" src="game_images/image_countdown.png" />
+
+<img width="1364" height="694" alt="image" src="game_images/image_race.png" />
+
 5. Manual do Jogo
+
+Controles de Menu: 
+- Setas para Cima e para Baixo: alternam entre as opções do menu;
+- Enter seleciona a opção marcada.
+
+Controles de Jogo:
+Jogador 0:
+- Tecla W: acelera o carro;
+- Tecla S: desacelera o carro;
+- Tecla A: faz com que o carro mude para uma faixa mais externa da pista;
+- Tecla D: faz com que o carro mude para uma faixa mais interna da pista;
+
+Jogador 1: 
+- Tecla Cima: acelera o carro;
+- Tecla Baixo: desacelera o carro;
+- Tecla Esquerda: faz com que o carro mude para uma faixa mais externa da pista;
+- Tecla Direita: faz com que o carro mude para uma faixa mais interna da pista;
 
 6. Explicação de Passos para Compilação
 
