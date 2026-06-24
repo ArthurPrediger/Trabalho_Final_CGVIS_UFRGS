@@ -12,13 +12,39 @@ set(SOURCES
   src/tiny_obj_loader.cpp
   src/stb_image.cpp
   src/glad.c
+  src/element.cpp
+  src/entity.cpp
+  src/component.cpp
+  src/curve_path_loader.cpp
+  src/collisions.cpp
+  src/obj_model.cpp
 )
+
+set(HEADERS
+  include/element.h
+  include/entity.h
+  include/component.h
+  include/curve_path_loader.h
+  include/matrix_operations.h
+  include/collisions.h
+  include/obj_model.h
+)
+
+set(SHADERS
+  shaders/shader_fragment_semi_pbr.glsl
+  shaders/shader_fragment_blinn_phong.glsl
+  shaders/shader_fragment.glsl
+  shaders/shader_vertex.glsl
+)
+
+source_group("Header Files" FILES ${HEADERS})
+source_group("Shaders" FILES ${SHADERS})
 
 cmake_minimum_required(VERSION 3.5.0)
 
-project(LAB_FCG VERSION 1.0.0)
+project(SlotcarGame VERSION 1.0.0)
 
-set(CMAKE_CXX_STANDARD          11)
+set(CMAKE_CXX_STANDARD          20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS        OFF)
 
@@ -55,7 +81,11 @@ Por favor, atualize a lista de arquivos fonte no arquivo CMakeLists.txt.")
   endif()
 endforeach()
 
-add_executable(${EXECUTABLE_NAME} ${SOURCES})
+add_executable(${EXECUTABLE_NAME} 
+  ${SOURCES}
+  ${HEADERS}
+  ${SHADERS}
+)
 
 target_include_directories(${EXECUTABLE_NAME} BEFORE PRIVATE ${PROJECT_SOURCE_DIR}/include)
 

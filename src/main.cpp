@@ -1,3 +1,4 @@
+
 //     Universidade Federal do Rio Grande do Sul
 //             Instituto de Informática
 //       Departamento de Informática Aplicada
@@ -25,11 +26,16 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <array>
 #include <limits>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <unordered_map>
+#include <iostream>
+#include <format>
+#include <random>
 
 // Headers das bibliotecas OpenGL
 #include <glad/glad.h>   // Criação de contexto OpenGL 3.3
@@ -47,90 +53,38 @@
 
 // Headers locais, definidos na pasta "include/"
 #include "utils.h"
-#include "matrices.h"
 
-// Estrutura que representa um modelo geométrico carregado a partir de um
-// arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
-struct ObjModel
-{
-    tinyobj::attrib_t                 attrib;
-    std::vector<tinyobj::shape_t>     shapes;
-    std::vector<tinyobj::material_t>  materials;
+#include "entity.h"
+#include "curve_path_loader.h"
+#include "matrix_operations.h"
+#include "obj_model.h"
+#include "collisions.h"
 
-    // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
-    // Veja: https://github.com/syoyo/tinyobjloader
-    ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true)
-    {
-        printf("Carregando objetos do arquivo \"%s\"...\n", filename);
-
-        // Se basepath == NULL, então setamos basepath como o dirname do
-        // filename, para que os arquivos MTL sejam corretamente carregados caso
-        // estejam no mesmo diretório dos arquivos OBJ.
-        std::string fullpath(filename);
-        std::string dirname;
-        if (basepath == NULL)
-        {
-            auto i = fullpath.find_last_of("/");
-            if (i != std::string::npos)
-            {
-                dirname = fullpath.substr(0, i+1);
-                basepath = dirname.c_str();
-            }
-        }
-
-        std::string warn;
-        std::string err;
-        bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, basepath, triangulate);
-
-        if (!err.empty())
-            fprintf(stderr, "\n%s\n", err.c_str());
-
-        if (!ret)
-            throw std::runtime_error("Erro ao carregar modelo.");
-
-        for (size_t shape = 0; shape < shapes.size(); ++shape)
-        {
-            if (shapes[shape].name.empty())
-            {
-                fprintf(stderr,
-                        "*********************************************\n"
-                        "Erro: Objeto sem nome dentro do arquivo '%s'.\n"
-                        "Veja https://www.inf.ufrgs.br/~eslgastal/fcg-faq-etc.html#Modelos-3D-no-formato-OBJ .\n"
-                        "*********************************************\n",
-                    filename);
-                throw std::runtime_error("Objeto sem nome.");
-            }
-            printf("- Objeto '%s'\n", shapes[shape].name.c_str());
-        }
-
-        printf("OK.\n");
-    }
-};
-
+constexpr int32_t max_int32 = (std::numeric_limits<int32_t>::max)();
 
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
-void PushMatrix(glm::mat4 M);
-void PopMatrix(glm::mat4& M);
+//void PushMatrix(glm::mat4 M);
+//void PopMatrix(glm::mat4& M);
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
-void BuildTrianglesAndAddToVirtualScene(ObjModel*); // Constrói representação de um ObjModel como malha de triângulos para renderização
-void ComputeNormals(ObjModel* model); // Computa normais de um ObjModel, caso não existam.
+void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model); // Constrói representação de um ObjModel como malha de triângulos para renderização
+void ComputeNormals(std::shared_ptr<ObjModel> model); // Computa normais de um ObjModel, caso não existam.
+void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model);
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-void LoadTextureImage(const char* filename); // Função que carrega imagens de textura
-void DrawVirtualObject(const char* object_name); // Desenha um objeto armazenado em g_VirtualScene
+void DrawVirtualMesh(std::shared_ptr<MeshComp> virtual_mesh_component); // Desenha uma um componente de malha 
 GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
 void LoadShader(const char* filename, GLuint shader_id); // Função utilizada pelas duas acima
 GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id); // Cria um programa de GPU
-void PrintObjModelInfo(ObjModel*); // Função para debugging
+void PrintObjModelInfo(std::shared_ptr<ObjModel> model); // Função para debugging
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
 void TextRendering_Init();
 float TextRendering_LineHeight(GLFWwindow* window);
 float TextRendering_CharWidth(GLFWwindow* window);
-void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float x, float y, float scale = 1.0f);
+void TextRendering_PrintString(GLFWwindow* window, const std::string& str, float x, float y, float scale = 1.0f, glm::vec3 text_color = { 0, 0, 0 });
 void TextRendering_PrintMatrix(GLFWwindow* window, glm::mat4 M, float x, float y, float scale = 1.0f);
 void TextRendering_PrintVector(GLFWwindow* window, glm::vec4 v, float x, float y, float scale = 1.0f);
 void TextRendering_PrintMatrixVectorProduct(GLFWwindow* window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
@@ -153,18 +107,59 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
-// Definimos uma estrutura que armazenará dados necessários para renderizar
-// cada objeto da cena virtual.
-struct SceneObject
+// New user classes definitions
+class Car : public Entity
 {
-    std::string  name;        // Nome do objeto
-    size_t       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    size_t       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    GLenum       rendering_mode; // Modo de rasterização (GL_TRIANGLES, GL_TRIANGLE_STRIP, etc.)
-    GLuint       vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
-    glm::vec3    bbox_min; // Axis-Aligned Bounding Box do objeto
-    glm::vec3    bbox_max;
+public:
+	Car(const std::string& name = "") : Entity(name) {};
+
+public:
+    glm::vec3 forward = glm::vec3(0.0f);
+	float speed;
+	std::array<int32_t, 4> input_keys;
+    std::vector<std::shared_ptr<MeshComp>> wheels_mesh_comps;
+    std::vector<std::shared_ptr<TransformComp>> wheels_transform_comps;
+    int32_t cur_curve_point;
+    glm::vec3 cur_curve_pos;
+    int32_t cur_lane;
+    glm::vec3 transition_curve_pos;
+    int32_t target_lane;
+	bool is_accelerating = false;
+	bool is_out_of_control = false;
+    float yaw_tremble_timer = 0.0f;
+	float out_of_control_timer = 0.0f;
+	float lane_transitioning_length = 0.0f;
+	int32_t laps_completed = 0;
 };
+
+class Track : public Entity
+{
+public:
+    Track(const std::string& name = "") : Entity(name) {};
+public:
+	std::vector<std::vector<glm::vec3>> lanes;
+	std::vector<float> lane_lengths;
+	std::vector<float> normalized_lane_lengths;
+};
+
+// New user functions declarations
+void UpdateGameStartScreen(GLFWwindow* window, double delta_time);
+void UpdateGameOverScreen(GLFWwindow* window, double delta_time, const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track);
+void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track);
+void UpdateFreeCamera(double delta_time);
+void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars);
+void UpdateCountdownCamera(float normalized_countdown_time);
+void DrawEntity(const std::shared_ptr<Entity> entity);
+void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars);
+std::vector<std::shared_ptr<MeshComp>> CreateMeshComponentsForModelByName(const std::string& model_name);
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys, glm::vec3 color = { 0, 0, 0 });
+void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track);
+void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track);
+std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes);
+std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
+std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes);
+float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2);
+float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::shared_ptr<Track> track);
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
@@ -172,10 +167,11 @@ struct SceneObject
 // (map).  Veja dentro da função BuildTrianglesAndAddToVirtualScene() como que são incluídos
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
-std::map<std::string, SceneObject> g_VirtualScene;
+std::unordered_map<std::string, std::shared_ptr<ObjModel>> g_loaded_models;
+std::unordered_map<uint32_t, std::vector<std::shared_ptr<MeshComp>>> g_entities_virtual_meshes;
 
 // Pilha que guardará as matrizes de modelagem.
-std::stack<glm::mat4>  g_MatrixStack;
+//std::stack<glm::mat4>  g_MatrixStack;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -187,43 +183,68 @@ float g_AngleZ = 0.0f;
 
 // "g_LeftMouseButtonPressed = true" se o usuário está com o botão esquerdo do mouse
 // pressionado no momento atual. Veja função MouseButtonCallback().
-bool g_LeftMouseButtonPressed = false;
-bool g_RightMouseButtonPressed = false; // Análogo para botão direito do mouse
-bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mouse
+bool g_left_mouse_button_pressed = false;
+bool g_right_mouse_button_pressed = false; // Análogo para botão direito do mouse
+bool g_middle_mouse_button_pressed = false; // Análogo para botão do meio do mouse
+double g_last_mouse_cursor_x = 0.0;
+double g_last_mouse_cursor_y = 0.0;
+double g_mouse_cursor_delta_x = 0.0;
+double g_mouse_cursor_delta_y = 0.0;
 
-// Variáveis que definem a câmera em coordenadas esféricas, controladas pelo
-// usuário através do mouse (veja função CursorPosCallback()). A posição
-// efetiva da câmera é calculada dentro da função main(), dentro do loop de
-// renderização.
-float g_CameraTheta = 0.0f; // Ângulo no plano ZX em relação ao eixo Z
-float g_CameraPhi = 0.0f;   // Ângulo em relação ao eixo Y
-float g_CameraDistance = 3.5f; // Distância da câmera para a origem
+bool g_first_mouse = true;
+bool keys[GLFW_KEY_LAST];
 
-// Variáveis que controlam rotação do antebraço
-float g_ForearmAngleZ = 0.0f;
-float g_ForearmAngleX = 0.0f;
+bool g_is_on_game_start = true;
+bool g_is_playing_countdown = false;
+bool g_is_game_running = false;
+bool g_is_game_over = false;
+int32_t g_num_laps = 4;
+constexpr int32_t g_init_curve_point = 775;
 
-// Variáveis que controlam translação do torso
-float g_TorsoPositionX = 0.0f;
-float g_TorsoPositionY = 0.0f;
+static constexpr float g_countdown_duration = 4.0f;
+static float g_countdown_time = g_countdown_duration;
+
+static constexpr float g_lane_transitioning_length = 10.0f;
+
+glm::vec4 camera_position = { 6.99f, 7.26f, -5.00f, 1.0f };
+glm::vec4 camera_forward = { 0.0f, 0.0f, 1.0f, 0.0f };
+glm::vec4 camera_up = { 0.0f, 1.0f, 0.0f, 0.0f };
+glm::vec4 camera_right = glm::vec4(glm::cross(glm::vec3(camera_forward), glm::vec3(camera_up)), 0.0f);
+float camera_pitch = glm::radians<float>(-36.38);
+float camera_yaw = glm::radians<float>(-212.90);
+constexpr float camera_move_speed = 16.0f;
+constexpr float camera_rotation_speed = 0.005f;
+//double delta_time = 0.0f;
 
 // Variável que controla o tipo de projeção utilizada: perspectiva ou ortográfica.
 bool g_UsePerspectiveProjection = true;
 
 // Variável que controla se o texto informativo será mostrado na tela.
-bool g_ShowInfoText = true;
+bool g_show_info_text = true;
 
 // Variáveis que definem um programa de GPU (shaders). Veja função LoadShadersFromFiles().
 GLuint g_GpuProgramID = 0;
 GLint g_model_uniform;
 GLint g_view_uniform;
+GLint g_camera_position_uniform;
 GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
+GLint g_texture_uniform_0;
+GLint g_texture_uniform_1;
+GLint g_texture_uniform_2;
+GLint g_has_kd_texture_uniform;
+GLint g_has_ke_texture_uniform;
+GLint g_has_opacity_texture_uniform;
+GLint g_kd_uniform;
+GLint g_ks_uniform;
+GLint g_ke_uniform;
+GLint g_ns_uniform;
+GLint g_opacity_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
-GLuint g_NumLoadedTextures = 0;
+//GLuint g_NumLoadedTextures = 0;
 
 int main(int argc, char* argv[])
 {
@@ -254,7 +275,7 @@ int main(int argc, char* argv[])
     // Criamos uma janela do sistema operacional, com 800 colunas e 600 linhas
     // de pixels, e com título "INF01047 ...".
     GLFWwindow* window;
-    window = glfwCreateWindow(800, 600, "INF01047 - Seu Cartao - Seu Nome", NULL, NULL);
+    window = glfwCreateWindow(800, 600, "INF01047 - 00334521 - Arthur Rambo Prediger - SlotcarGame", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -298,28 +319,99 @@ int main(int argc, char* argv[])
     //
     LoadShadersFromFiles();
 
-    // Carregamos duas imagens para serem utilizadas como textura
-    LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
-    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
+    // Track model and entity
+    std::shared_ptr<ObjModel> curve_model = std::make_shared<ObjModel>("../../data/curve/curve.obj");
+    ComputeNormals(curve_model);
+    BuildTrianglesAndBuffers(curve_model);
+	g_loaded_models.emplace(curve_model->filepath, curve_model);
 
-    // Construímos a representação de objetos geométricos através de malhas de triângulos
-    ObjModel spheremodel("../../data/sphere.obj");
-    ComputeNormals(&spheremodel);
-    BuildTrianglesAndAddToVirtualScene(&spheremodel);
+    std::shared_ptr<Track> track = std::make_shared<Track>("track");
+    track->AddComponents(CreateMeshComponentsForModelByName(curve_model->filepath));
+    g_entities_virtual_meshes.emplace(track->GetId(), track->GetComponentsByType<MeshComp>());
+    track->root->scale = { 0.25f, 0.25f, 0.25f };
 
-    ObjModel bunnymodel("../../data/bunny.obj");
-    ComputeNormals(&bunnymodel);
-    BuildTrianglesAndAddToVirtualScene(&bunnymodel);
+    std::vector<glm::vec3> curve_points = LoadCurvePath("../../data/curve/trail.txt");
 
-    ObjModel planemodel("../../data/plane.obj");
-    ComputeNormals(&planemodel);
-    BuildTrianglesAndAddToVirtualScene(&planemodel);
+    track->lanes = SplitCurvePathInLanes(curve_points, 2),
+    track->lane_lengths = ComputeLaneLengths(track->lanes);
+    track->normalized_lane_lengths = ComputeNormalizedLaneLengths(track->lanes);
 
-    if ( argc > 1 )
+	// Finish line model and entity
+	std::shared_ptr<ObjModel> finish_line_model = std::make_shared<ObjModel>("../../data/finish_line/finish_line.obj");
+    ComputeNormals(finish_line_model);
+    BuildTrianglesAndBuffers(finish_line_model);
+	g_loaded_models.emplace(finish_line_model->filepath, finish_line_model);
+
+	std::shared_ptr<Entity> finish_line = std::make_shared<Entity>("finish_line");
+	finish_line->AddComponents(CreateMeshComponentsForModelByName(finish_line_model->filepath));
+	g_entities_virtual_meshes.emplace(finish_line->GetId(), finish_line->GetComponentsByType<MeshComp>());
+    glm::mat4 model = matops::MatrixIdentity(); // Transformação identidade de modelagem
+    model *= matops::MatrixScale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
+	finish_line->root->position = model * glm::vec4(curve_points[(g_init_curve_point + 10) % curve_points.size()], 1.0f);
+	finish_line->root->position.y += 0.01f;
+	finish_line->root->rotation = { 0.0, 82.0f, 0.0f };
+	finish_line->root->scale = { 1.0f, 1.0f, 0.2f };
+
+    // Finish line model and entity
+    std::shared_ptr<ObjModel> ground_model = std::make_shared<ObjModel>("../../data/ground/ground.obj");
+    ComputeNormals(ground_model);
+    BuildTrianglesAndBuffers(ground_model);
+    g_loaded_models.emplace(ground_model->filepath, ground_model);
+
+    std::shared_ptr<Entity> ground = std::make_shared<Entity>("ground");
+    ground->AddComponents(CreateMeshComponentsForModelByName(ground_model->filepath));
+    g_entities_virtual_meshes.emplace(ground->GetId(), ground->GetComponentsByType<MeshComp>());
+    ground->root->position = track->root->position + glm::vec3(0.0f, curve_points[0].y * track->root->scale.y - 0.01, 0.0f);
+	ground->root->scale = { 90.0f, 90.0f, 90.0f };
+
+	// Tree model and entity
+	std::shared_ptr<ObjModel> tree_model = std::make_shared<ObjModel>("../../data/tree/tree.obj");
+	ComputeNormals(tree_model);
+	BuildTrianglesAndBuffers(tree_model);
+	g_loaded_models.emplace(tree_model->filepath, tree_model);
+
+	std::shared_ptr<Entity> tree = std::make_shared<Entity>("tree");
+	tree->AddComponents(CreateMeshComponentsForModelByName(tree_model->filepath));
+	g_entities_virtual_meshes.emplace(tree->GetId(), tree->GetComponentsByType<MeshComp>());
+	tree->root->position = glm::vec3(0.0f, curve_points[0].y * track->root->scale.y - 0.01, 0.0f);
+	tree->root->scale = { 0.75f, 0.75f, 0.75f };
+
+    std::vector<glm::vec2> trees_positions = {
+        { -10.0, -5.0 }, { 6.0, -9.0 }, { -2.0 , -12.0 }, { 11.0 , -4.0 },
+        { 14.0, 1.0 }, { 16.0, -8.0 }, { -10.0 , -18.0 }, { 17.0 , 4.0 },
+        { 11.0, 11.0 }, { 6.0, -18.0 }, { -3.0 , -33.0 }, { -8.0 , -29.0 },
+        { 12.0, -35.0 }, { 2.0, -40.0 }, { -9.0 , -49.0 }, { 0.0 , -54.0 },
+        { 18.0, -28.0 }, { 27.0, -19.0 }, { 23.0 , -46.0 }, { 8.0 , -60.0 },
+        { -25.0, -45.0 }, { -22.0, -31.0 }, { -29.0 , -63.0 }, { -5.0 , -76.0 },
+        { 43.0, -6.0 }, { -6.0, -14.0 }, { -17.0 , 1.0 }, { -21.0 , -11.0 },
+        { 26.0, 8.0 }, { 27.0, -8.0 }, { 39.0 , -15.0 }, { -32.0 , -9.0 },
+        { 33.0, 0.0 }, { -5.0, 14 }, { 4.0, 16.0 }, { -10.0, 2.0 }
+    };
+
+    std::random_device rd;
+    std::mt19937 rng(rd()); // Mersenne Twister engine
+    std::uniform_real_distribution<float> tree_rot_dist(0.0f, 360.0f);
+    std::uniform_real_distribution<float> tree_scale_dist(0.6f, 0.85f);
+
+    std::vector<float> trees_rotations; trees_rotations.reserve(trees_positions.size());
+    std::vector<float> trees_scales; trees_scales.reserve(trees_positions.size());
+    for (int32_t i = 0; i < trees_positions.size(); ++i)
     {
-        ObjModel model(argv[1]);
-        BuildTrianglesAndAddToVirtualScene(&model);
+        trees_rotations.push_back(tree_rot_dist(rng));
+		trees_scales.push_back(tree_scale_dist(rng));
     }
+
+    // Car model and entities
+    std::shared_ptr<ObjModel> car_zr1_model = std::make_shared<ObjModel>("../../data/zr1_model/ZR1.obj");
+    ComputeNormals(car_zr1_model);
+    DivideModelMeshesByMaterial(car_zr1_model);
+    BuildTrianglesAndBuffers(car_zr1_model);
+    g_loaded_models.emplace(car_zr1_model->filepath, car_zr1_model);
+
+	std::vector<std::shared_ptr<Car>> cars = { 
+        CreateCar("ZR1_car_0", car_zr1_model,{ GLFW_KEY_W, GLFW_KEY_S, GLFW_KEY_D, GLFW_KEY_A }, { 0.53, 0.13, 0.11 }),
+        CreateCar("ZR1_car_1", car_zr1_model,{ GLFW_KEY_UP, GLFW_KEY_DOWN, GLFW_KEY_RIGHT, GLFW_KEY_LEFT }, { 0.09, 0.44, 0.063 }),
+    };
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -332,9 +424,44 @@ int main(int argc, char* argv[])
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
+    glfwGetCursorPos(window, &g_last_mouse_cursor_x, &g_last_mouse_cursor_y);
+
+    RestartGame(cars, track);
+
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
     while (!glfwWindowShouldClose(window))
     {
+        static double last_time = 0.0f;
+        const double cur_time = glfwGetTime();
+        double delta_time = cur_time - last_time;
+        last_time = cur_time;
+
+        if(g_is_playing_countdown)
+        {
+            g_countdown_time -= (float)(delta_time);
+            UpdateCountdownCamera(std::clamp(g_countdown_time / g_countdown_duration, 0.0f, 1.0f));
+
+            if(g_countdown_time <= 0)
+            {
+                g_is_playing_countdown = false;
+                g_is_game_running = true;
+			}
+		}
+        // INPUTS UPDATE
+        if (g_is_game_running)
+        {
+            //UpdateFreeCamera(delta_time);
+            UpdateRaceCamera(delta_time, cars);
+
+            // Cars movement and animation updates based on user input
+			for (std::shared_ptr<Car> car : cars)
+            {
+                UpdateCarInputAndAnimation(delta_time, car, track);
+            }
+
+            UpdateCarsPhysics(delta_time, cars, track);
+        }
+
         // Aqui executamos as operações de renderização
 
         // Definimos a cor do "fundo" do framebuffer como branco.  Tal cor é
@@ -343,7 +470,8 @@ int main(int argc, char* argv[])
         // Conversaremos sobre sistemas de cores nas aulas de Modelos de Iluminação.
         //
         //           R     G     B     A
-        glClearColor(0.9f, 0.9f, 1.0f, 1.0f);
+		float gray_value = powf(0.65f, 1.0f / 2.2f);
+        glClearColor(gray_value, gray_value, gray_value, 1.0f);
 
         // "Pintamos" todos os pixels do framebuffer com a cor definida acima,
         // e também resetamos todos os pixels do Z-buffer (depth buffer).
@@ -353,25 +481,15 @@ int main(int argc, char* argv[])
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
-        // Computamos a posição da câmera utilizando coordenadas esféricas.  As
-        // variáveis g_CameraDistance, g_CameraPhi, e g_CameraTheta são
-        // controladas pelo mouse do usuário. Veja as funções CursorPosCallback()
-        // e ScrollCallback().
-        float r = g_CameraDistance;
-        float y = r*sin(g_CameraPhi);
-        float z = r*cos(g_CameraPhi)*cos(g_CameraTheta);
-        float x = r*cos(g_CameraPhi)*sin(g_CameraTheta);
+        glUniform1i(g_texture_uniform_0, 0);
+        glUniform1i(g_texture_uniform_1, 1);
+        glUniform1i(g_texture_uniform_2, 2);
 
-        // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        // Veja slides 195-227 e 229-234 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        glm::vec4 camera_position_c  = glm::vec4(x,y,z,1.0f); // Ponto "c", centro da câmera
-        glm::vec4 camera_lookat_l    = glm::vec4(0.0f,0.0f,0.0f,1.0f); // Ponto "l", para onde a câmera (look-at) estará sempre olhando
-        glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; // Vetor "view", sentido para onde a câmera está virada
-        glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); // Vetor "up" fixado para apontar para o "céu" (eito Y global)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
+        glm::mat4 view = matops::MatrixCameraView(camera_position, camera_forward, camera_up);
 
         // Agora computamos a matriz de Projeção.
         glm::mat4 projection;
@@ -379,69 +497,83 @@ int main(int argc, char* argv[])
         // Note que, no sistema de coordenadas da câmera, os planos near e far
         // estão no sentido negativo! Veja slides 176-204 do documento Aula_09_Projecoes.pdf.
         float nearplane = -0.1f;  // Posição do "near plane"
-        float farplane  = -10.0f; // Posição do "far plane"
+        float farplane  = -1000.0f; // Posição do "far plane"
 
-        if (g_UsePerspectiveProjection)
-        {
-            // Projeção Perspectiva.
-            // Para definição do field of view (FOV), veja slides 205-215 do documento Aula_09_Projecoes.pdf.
-            float field_of_view = 3.141592 / 3.0f;
-            projection = Matrix_Perspective(field_of_view, g_ScreenRatio, nearplane, farplane);
-        }
-        else
-        {
-            // Projeção Ortográfica.
-            // Para definição dos valores l, r, b, t ("left", "right", "bottom", "top"),
-            // PARA PROJEÇÃO ORTOGRÁFICA veja slides 219-224 do documento Aula_09_Projecoes.pdf.
-            // Para simular um "zoom" ortográfico, computamos o valor de "t"
-            // utilizando a variável g_CameraDistance.
-            float t = 1.5f*g_CameraDistance/2.5f;
-            float b = -t;
-            float r = t*g_ScreenRatio;
-            float l = -r;
-            projection = Matrix_Orthographic(l, r, b, t, nearplane, farplane);
-        }
-
-        glm::mat4 model = Matrix_Identity(); // Transformação identidade de modelagem
+        // Projeção Perspectiva.
+        // Para definição do field of view (FOV), veja slides 205-215 do documento Aula_09_Projecoes.pdf.
+        float field_of_view = 3.141592 / 3.0f;
+        projection = matops::MatrixPerspective(field_of_view, g_ScreenRatio, nearplane, farplane);
 
         // Enviamos as matrizes "view" e "projection" para a placa de vídeo
         // (GPU). Veja o arquivo "shader_vertex.glsl", onde estas são
         // efetivamente aplicadas em todos os pontos.
         glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
+        glUniform3f(g_camera_position_uniform, camera_position.x, camera_position.y, camera_position.z);
 
-        #define SPHERE 0
-        #define BUNNY  1
-        #define PLANE  2
+        // Desenhamos o chão
+        DrawEntity(ground);
+        // Desenhamos a pista
+		DrawEntity(track);
+        // Desenhamos a linha de chegada
+		DrawEntity(finish_line);
+        // Desenhamos as árvores
+        for(int32_t i = 0; i < trees_positions.size(); ++i)
+        {
+            tree->root->position.x = trees_positions[i].x;
+            tree->root->position.z = trees_positions[i].y;
+			tree->root->rotation.y = trees_rotations[i];
+			float scale = trees_scales[i];
+			tree->root->scale = { scale, scale, scale };
+            DrawEntity(tree);
+        }
 
-        // Desenhamos o modelo da esfera
-        model = Matrix_Translate(-1.0f,0.0f,0.0f)
-              * Matrix_Rotate_Z(0.6f)
-              * Matrix_Rotate_X(0.2f)
-              * Matrix_Rotate_Y(g_AngleY + (float)glfwGetTime() * 0.1f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, SPHERE);
-        DrawVirtualObject("the_sphere");
+        // Desenhamos os carros
+        for (std::shared_ptr<Car> car : cars)
+        {
+            DrawEntity(car);
+        }
 
-        // Desenhamos o modelo do coelho
-        model = Matrix_Translate(1.0f,0.0f,0.0f)
-              * Matrix_Rotate_X(g_AngleX + (float)glfwGetTime() * 0.1f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, BUNNY);
-        DrawVirtualObject("the_bunny");
+        if (g_is_on_game_start)
+        {
+            UpdateGameStartScreen(window, delta_time);
+        }
+        else if (g_is_playing_countdown || g_countdown_time <= 0)
+        {
+            constexpr float countdown_text_scale = 4.0f;
+			constexpr glm::vec3 countdown_text_color = { 0.75f, 0.75f, 0.1f };
+            if(g_countdown_time > 0)
+            {
+                TextRendering_PrintString(window, std::to_string(int(std::ceil(g_countdown_time))), 0.0f - (TextRendering_CharWidth(window) / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
+            }
+            else
+            {
+				TextRendering_PrintString(window, "GO!", 0.0f - (TextRendering_CharWidth(window) * 3 / 2) * countdown_text_scale, 0.0f, countdown_text_scale, countdown_text_color);
+                
+                g_countdown_time -= delta_time;
+                g_countdown_time = g_countdown_time < -1.5f ? g_countdown_duration : g_countdown_time;
+            }
+		}
+        else if(g_is_game_over)
+        {
+            UpdateGameOverScreen(window, delta_time, cars, track);
+		}
 
-        // Desenhamos o plano do chão
-        model = Matrix_Translate(0.0f,-1.1f,0.0f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, PLANE);
-        DrawVirtualObject("the_plane");
+        if (g_is_playing_countdown || g_is_game_running)
+        {
+            UpdateRaceUserInterface(window, cars);
+        }
+
+		//TextRendering_PrintVector(window, camera_position, -0.9, 0.9f);
+		//TextRendering_PrintString(window, std::to_string(glm::degrees(camera_pitch)), -0.7, 0.9f);
+		//TextRendering_PrintString(window, std::to_string(glm::degrees(camera_yaw)), -0.7, 0.85f);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
-        TextRendering_ShowEulerAngles(window);
+        //TextRendering_ShowEulerAngles(window);
 
         // Imprimimos na informação sobre a matriz de projeção sendo utilizada.
-        TextRendering_ShowProjection(window);
+        //TextRendering_ShowProjection(window);
 
         // Imprimimos na tela informação sobre o número de quadros renderizados
         // por segundo (frames per second).
@@ -469,71 +601,19 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-// Função que carrega uma imagem para ser utilizada como textura
-void LoadTextureImage(const char* filename)
-{
-    printf("Carregando imagem \"%s\"... ", filename);
-
-    // Primeiro fazemos a leitura da imagem do disco
-    stbi_set_flip_vertically_on_load(true);
-    int width;
-    int height;
-    int channels;
-    unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
-
-    if ( data == NULL )
-    {
-        fprintf(stderr, "ERROR: Cannot open image file \"%s\".\n", filename);
-        std::exit(EXIT_FAILURE);
-    }
-
-    printf("OK (%dx%d).\n", width, height);
-
-    // Agora criamos objetos na GPU com OpenGL para armazenar a textura
-    GLuint texture_id;
-    GLuint sampler_id;
-    glGenTextures(1, &texture_id);
-    glGenSamplers(1, &sampler_id);
-
-    // Veja slides 95-96 do documento Aula_20_Mapeamento_de_Texturas.pdf
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    // Parâmetros de amostragem da textura.
-    glSamplerParameteri(sampler_id, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glSamplerParameteri(sampler_id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    // Agora enviamos a imagem lida do disco para a GPU
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-
-    GLuint textureunit = g_NumLoadedTextures;
-    glActiveTexture(GL_TEXTURE0 + textureunit);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glBindSampler(textureunit, sampler_id);
-
-    stbi_image_free(data);
-
-    g_NumLoadedTextures += 1;
-}
-
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
 // dos objetos na função BuildTrianglesAndAddToVirtualScene().
-void DrawVirtualObject(const char* object_name)
+void DrawVirtualMesh(std::shared_ptr<MeshComp> virtual_scene_obj_component)
 {
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
     // comentários detalhados dentro da definição de BuildTrianglesAndAddToVirtualScene().
-    glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
+    glBindVertexArray(virtual_scene_obj_component->vertex_array_object_id);
 
     // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
     // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
-    glm::vec3 bbox_min = g_VirtualScene[object_name].bbox_min;
-    glm::vec3 bbox_max = g_VirtualScene[object_name].bbox_max;
+    glm::vec3 bbox_min = virtual_scene_obj_component->bbox_min;
+    glm::vec3 bbox_max = virtual_scene_obj_component->bbox_max;
     glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
 
@@ -543,10 +623,10 @@ void DrawVirtualObject(const char* object_name)
     // a documentação da função glDrawElements() em
     // http://docs.gl/gl3/glDrawElements.
     glDrawElements(
-        g_VirtualScene[object_name].rendering_mode,
-        g_VirtualScene[object_name].num_indices,
+        virtual_scene_obj_component->rendering_mode,
+        virtual_scene_obj_component->num_indices,
         GL_UNSIGNED_INT,
-        (void*)(g_VirtualScene[object_name].first_index * sizeof(GLuint))
+        (void*)(virtual_scene_obj_component->first_index * sizeof(GLuint))
     );
 
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
@@ -577,8 +657,10 @@ void LoadShadersFromFiles()
     //       |
     //       o-- shader_fragment.glsl
     //
-    GLuint vertex_shader_id = LoadShader_Vertex("../../src/shader_vertex.glsl");
-    GLuint fragment_shader_id = LoadShader_Fragment("../../src/shader_fragment.glsl");
+    GLuint vertex_shader_id = LoadShader_Vertex("../../shaders/shader_vertex.glsl");
+    //GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment.glsl");
+    //GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment_blinn_phong.glsl");
+    GLuint fragment_shader_id = LoadShader_Fragment("../../shaders/shader_fragment_semi_pbr.glsl");
 
     // Deletamos o programa de GPU anterior, caso ele exista.
     if ( g_GpuProgramID != 0 )
@@ -590,44 +672,36 @@ void LoadShadersFromFiles()
     // Buscamos o endereço das variáveis definidas dentro do Vertex Shader.
     // Utilizaremos estas variáveis para enviar dados para a placa de vídeo
     // (GPU)! Veja arquivo "shader_vertex.glsl" e "shader_fragment.glsl".
-    g_model_uniform      = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
-    g_view_uniform       = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
-    g_projection_uniform = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
-    g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
-    g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
-    g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_model_uniform       = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
+    g_view_uniform        = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
+    g_projection_uniform  = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
+	g_camera_position_uniform = glGetUniformLocation(g_GpuProgramID, "camera_position"); // Variável da posição da câmera em shader_fragment.glsl
+    g_object_id_uniform   = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
+    g_bbox_min_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_min");
+    g_bbox_max_uniform    = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+	g_has_kd_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_kd_texture");
+	g_has_ke_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_ke_texture");
+	g_has_opacity_texture_uniform = glGetUniformLocation(g_GpuProgramID, "has_opacity_texture");
+	g_kd_uniform          = glGetUniformLocation(g_GpuProgramID, "kd");
+	g_ks_uniform          = glGetUniformLocation(g_GpuProgramID, "ks");
+	g_ke_uniform          = glGetUniformLocation(g_GpuProgramID, "ke");
+	g_ns_uniform          = glGetUniformLocation(g_GpuProgramID, "ns");
+	g_opacity_uniform          = glGetUniformLocation(g_GpuProgramID, "opacity");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
-    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
+    g_texture_uniform_0 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_kd");
+    g_texture_uniform_1 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_ke");
+    g_texture_uniform_2 = glGetUniformLocation(g_GpuProgramID, "texture_sampler_opacity");
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
+    //glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
     glUseProgram(0);
-}
-
-// Função que pega a matriz M e guarda a mesma no topo da pilha
-void PushMatrix(glm::mat4 M)
-{
-    g_MatrixStack.push(M);
-}
-
-// Função que remove a matriz atualmente no topo da pilha e armazena a mesma na variável M
-void PopMatrix(glm::mat4& M)
-{
-    if ( g_MatrixStack.empty() )
-    {
-        M = Matrix_Identity();
-    }
-    else
-    {
-        M = g_MatrixStack.top();
-        g_MatrixStack.pop();
-    }
 }
 
 // Função que computa as normais de um ObjModel, caso elas não tenham sido
 // especificadas dentro do arquivo ".obj"
-void ComputeNormals(ObjModel* model)
+void ComputeNormals(std::shared_ptr<ObjModel> model)
 {
     if ( !model->attrib.normals.empty() )
         return;
@@ -689,7 +763,7 @@ void ComputeNormals(ObjModel* model)
                 const glm::vec4  b = vertices[1];
                 const glm::vec4  c = vertices[2];
 
-                const glm::vec4  n = crossproduct(b-a,c-a);
+                const glm::vec4  n = glm::vec4(glm::cross(glm::vec3(b-a),glm::vec3(c-a)), 0.0f);
 
                 for (size_t vertex = 0; vertex < 3; ++vertex)
                 {
@@ -709,7 +783,7 @@ void ComputeNormals(ObjModel* model)
                 continue;
 
             glm::vec4 n = vertex_normals[vertex_index] / (float)num_triangles_per_vertex[vertex_index];
-            n /= norm(n);
+            n = glm::normalize(n);
 
             model->attrib.normals.push_back( n.x );
             model->attrib.normals.push_back( n.y );
@@ -743,8 +817,90 @@ void ComputeNormals(ObjModel* model)
     }
 }
 
+void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model)
+{
+    std::vector<tinyobj::shape_t> new_shapes;
+
+    for (const auto& shape : model->shapes)
+    {
+        // Check whether all faces use the same material
+        bool multiple_materials = false;
+
+        if (!shape.mesh.material_ids.empty())
+        {
+            int first_mat = shape.mesh.material_ids[0];
+
+            for (size_t i = 1; i < shape.mesh.material_ids.size(); i++)
+            {
+                if (shape.mesh.material_ids[i] != first_mat)
+                {
+                    multiple_materials = true;
+                    break;
+                }
+            }
+        }
+
+        // If already single-material, keep as-is
+        if (!multiple_materials)
+        {
+            new_shapes.push_back(shape);
+            continue;
+        }
+
+        // Split by material
+        std::unordered_map<int, tinyobj::shape_t> split_shapes;
+
+        size_t index_offset = 0;
+
+        for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); face++)
+        {
+            int material_id = shape.mesh.material_ids[face];
+
+            // Create split shape if necessary
+            if (split_shapes.find(material_id) == split_shapes.end())
+            {
+                tinyobj::shape_t split_shape;
+
+                split_shape.name =
+                    shape.name + "_mat_" + std::to_string(material_id);
+
+                split_shapes[material_id] = split_shape;
+            }
+
+            auto& dst_shape = split_shapes[material_id];
+
+            uint8_t fv = shape.mesh.num_face_vertices[face];
+
+            // Copy face vertex count
+            dst_shape.mesh.num_face_vertices.push_back(fv);
+
+            // Copy material id
+            dst_shape.mesh.material_ids.push_back(material_id);
+
+            // Copy indices
+            for (size_t v = 0; v < fv; v++)
+            {
+                dst_shape.mesh.indices.push_back(
+                    shape.mesh.indices[index_offset + v]
+                );
+            }
+
+            index_offset += fv;
+        }
+
+        // Append split shapes
+        for (auto& kv : split_shapes)
+        {
+            new_shapes.push_back(std::move(kv.second));
+        }
+    }
+
+    // Replace original shapes vector
+    model->shapes = std::move(new_shapes);
+}
+
 // Constrói triângulos para futura renderização a partir de um ObjModel.
-void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
+void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
@@ -755,13 +911,16 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
     std::vector<float>  normal_coefficients;
     std::vector<float>  texture_coefficients;
 
+    constexpr float minval = std::numeric_limits<float>::lowest();
+    constexpr float maxval = std::numeric_limits<float>::max();
+
+    model->min_bounds = glm::vec3(maxval, maxval, maxval);
+    model->max_bounds = glm::vec3(minval, minval, minval);
+
     for (size_t shape = 0; shape < model->shapes.size(); ++shape)
     {
         size_t first_index = indices.size();
         size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-
-        const float minval = std::numeric_limits<float>::min();
-        const float maxval = std::numeric_limits<float>::max();
 
         glm::vec3 bbox_min = glm::vec3(maxval,maxval,maxval);
         glm::vec3 bbox_max = glm::vec3(minval,minval,minval);
@@ -820,17 +979,14 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
 
         size_t last_index = indices.size() - 1;
 
-        SceneObject theobject;
-        theobject.name           = model->shapes[shape].name;
-        theobject.first_index    = first_index; // Primeiro índice
-        theobject.num_indices    = last_index - first_index + 1; // Número de indices
-        theobject.rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        theobject.vertex_array_object_id = vertex_array_object_id;
+        model->first_indices.push_back(first_index); // Primeiro índice
+        model->num_indices.push_back(last_index - first_index + 1); // Número de indices
+        model->vertex_array_object_ids.push_back(vertex_array_object_id);
+        model->bboxes_min.push_back(bbox_min);
+        model->bboxes_max.push_back(bbox_max);
 
-        theobject.bbox_min = bbox_min;
-        theobject.bbox_max = bbox_max;
-
-        g_VirtualScene[model->shapes[shape].name] = theobject;
+        model->min_bounds = glm::min(model->min_bounds, bbox_min);
+        model->max_bounds = glm::max(model->max_bounds, bbox_max);
     }
 
     GLuint VBO_model_coefficients_id;
@@ -1060,7 +1216,6 @@ void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
 // Variáveis globais que armazenam a última posição do cursor do mouse, para
 // que possamos calcular quanto que o mouse se movimentou entre dois instantes
 // de tempo. Utilizadas no callback CursorPosCallback() abaixo.
-double g_LastCursorPosX, g_LastCursorPosY;
 
 // Função callback chamada sempre que o usuário aperta algum dos botões do mouse
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
@@ -1072,14 +1227,14 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_LastCursorPosY.  Também, setamos a variável
         // g_LeftMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
-        glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_LeftMouseButtonPressed = true;
+        //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
+        g_left_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_LeftMouseButtonPressed = false;
+        g_left_mouse_button_pressed = false;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
     {
@@ -1088,14 +1243,14 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_LastCursorPosY.  Também, setamos a variável
         // g_RightMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
-        glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_RightMouseButtonPressed = true;
+        //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
+        g_right_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_RightMouseButtonPressed = false;
+        g_right_mouse_button_pressed = false;
     }
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS)
     {
@@ -1104,14 +1259,14 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         // g_LastCursorPosY.  Também, setamos a variável
         // g_MiddleMouseButtonPressed como true, para saber que o usuário está
         // com o botão esquerdo pressionado.
-        glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
-        g_MiddleMouseButtonPressed = true;
+        //glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
+        g_middle_mouse_button_pressed = true;
     }
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
-        g_MiddleMouseButtonPressed = false;
+        g_middle_mouse_button_pressed = false;
     }
 }
 
@@ -1125,63 +1280,22 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     // parâmetros que definem a posição da câmera dentro da cena virtual.
     // Assim, temos que o usuário consegue controlar a câmera.
 
-    if (g_LeftMouseButtonPressed)
+    if (g_left_mouse_button_pressed)
     {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-    
-        // Atualizamos parâmetros da câmera com os deslocamentos
-        g_CameraTheta -= 0.01f*dx;
-        g_CameraPhi   += 0.01f*dy;
-    
-        // Em coordenadas esféricas, o ângulo phi deve ficar entre -pi/2 e +pi/2.
-        float phimax = 3.141592f/2;
-        float phimin = -phimax;
-    
-        if (g_CameraPhi > phimax)
-            g_CameraPhi = phimax;
-    
-        if (g_CameraPhi < phimin)
-            g_CameraPhi = phimin;
-    
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
+        g_mouse_cursor_delta_x += g_last_mouse_cursor_x - xpos;
+        g_mouse_cursor_delta_y += g_last_mouse_cursor_y - ypos;
     }
 
-    if (g_RightMouseButtonPressed)
+    if (g_right_mouse_button_pressed)
     {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-    
-        // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_ForearmAngleZ -= 0.01f*dx;
-        g_ForearmAngleX += 0.01f*dy;
-    
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
     }
 
-    if (g_MiddleMouseButtonPressed)
+    if (g_middle_mouse_button_pressed)
     {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-    
-        // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_TorsoPositionX += 0.01f*dx;
-        g_TorsoPositionY -= 0.01f*dy;
-    
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
     }
+
+    g_last_mouse_cursor_x = xpos;
+    g_last_mouse_cursor_y = ypos;
 }
 
 // Função callback chamada sempre que o usuário movimenta a "rodinha" do mouse.
@@ -1189,16 +1303,16 @@ void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     // Atualizamos a distância da câmera para a origem utilizando a
     // movimentação da "rodinha", simulando um ZOOM.
-    g_CameraDistance -= 0.1f*yoffset;
+    //g_CameraDistance -= 0.1f*yoffset;
 
     // Uma câmera look-at nunca pode estar exatamente "em cima" do ponto para
     // onde ela está olhando, pois isto gera problemas de divisão por zero na
     // definição do sistema de coordenadas da câmera. Isto é, a variável abaixo
     // nunca pode ser zero. Versões anteriores deste código possuíam este bug,
     // o qual foi detectado pelo aluno Vinicius Fraga (2017/2).
-    const float verysmallnumber = std::numeric_limits<float>::epsilon();
-    if (g_CameraDistance < verysmallnumber)
-        g_CameraDistance = verysmallnumber;
+    //const float verysmallnumber = std::numeric_limits<float>::epsilon();
+    //if (g_CameraDistance < verysmallnumber)
+    //    g_CameraDistance = verysmallnumber;
 }
 
 void Correcao_KeyCallback(int key, int action, int mod);
@@ -1247,10 +1361,10 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
         g_AngleX = 0.0f;
         g_AngleY = 0.0f;
         g_AngleZ = 0.0f;
-        g_ForearmAngleX = 0.0f;
-        g_ForearmAngleZ = 0.0f;
-        g_TorsoPositionX = 0.0f;
-        g_TorsoPositionY = 0.0f;
+        //g_ForearmAngleX = 0.0f;
+        //g_ForearmAngleZ = 0.0f;
+        //g_TorsoPositionX = 0.0f;
+        //g_TorsoPositionY = 0.0f;
     }
 
     // Se o usuário apertar a tecla P, utilizamos projeção perspectiva.
@@ -1268,7 +1382,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
     // Se o usuário apertar a tecla H, fazemos um "toggle" do texto informativo mostrado na tela.
     if (key == GLFW_KEY_H && action == GLFW_PRESS)
     {
-        g_ShowInfoText = !g_ShowInfoText;
+        g_show_info_text = !g_show_info_text;
     }
 
     // Se o usuário apertar a tecla R, recarregamos os shaders dos arquivos "shader_fragment.glsl" e "shader_vertex.glsl".
@@ -1278,6 +1392,13 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
         fprintf(stdout,"Shaders recarregados!\n");
         fflush(stdout);
     }
+
+    // Held down keys update
+    if (action == GLFW_PRESS)
+        keys[key] = true;
+
+    if (action == GLFW_RELEASE)
+        keys[key] = false;
 }
 
 // Definimos o callback para impressão de erros da GLFW no terminal
@@ -1298,7 +1419,7 @@ void TextRendering_ShowModelViewProjection(
     glm::vec4 p_model
 )
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     glm::vec4 p_world = model*p_model;
@@ -1333,7 +1454,7 @@ void TextRendering_ShowModelViewProjection(
     glm::vec2 p = glm::vec2( 0,  0);
     glm::vec2 q = glm::vec2(width, height);
 
-    glm::mat4 viewport_mapping = Matrix(
+    glm::mat4 viewport_mapping = glm::mat4(
         (q.x - p.x)/(b.x-a.x), 0.0f, 0.0f, (b.x*p.x - a.x*q.x)/(b.x-a.x),
         0.0f, (q.y - p.y)/(b.y-a.y), 0.0f, (b.y*p.y - a.y*q.y)/(b.y-a.y),
         0.0f , 0.0f , 1.0f , 0.0f ,
@@ -1352,7 +1473,7 @@ void TextRendering_ShowModelViewProjection(
 // g_AngleX, g_AngleY, e g_AngleZ.
 void TextRendering_ShowEulerAngles(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     float pad = TextRendering_LineHeight(window);
@@ -1366,7 +1487,7 @@ void TextRendering_ShowEulerAngles(GLFWwindow* window)
 // Escrevemos na tela qual matriz de projeção está sendo utilizada.
 void TextRendering_ShowProjection(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     float lineheight = TextRendering_LineHeight(window);
@@ -1382,7 +1503,7 @@ void TextRendering_ShowProjection(GLFWwindow* window)
 // second).
 void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
 {
-    if ( !g_ShowInfoText )
+    if ( !g_show_info_text )
         return;
 
     // Variáveis estáticas (static) mantém seus valores entre chamadas
@@ -1417,7 +1538,7 @@ void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
 // Função para debugging: imprime no terminal todas informações de um modelo
 // geométrico carregado de um arquivo ".obj".
 // Veja: https://github.com/syoyo/tinyobjloader/blob/22883def8db9ef1f3ffb9b404318e7dd25fdbb51/loader_example.cc#L98
-void PrintObjModelInfo(ObjModel* model)
+void PrintObjModelInfo(std::shared_ptr<ObjModel> model)
 {
   const tinyobj::attrib_t                & attrib    = model->attrib;
   const std::vector<tinyobj::shape_t>    & shapes    = model->shapes;
@@ -1583,6 +1704,1003 @@ void PrintObjModelInfo(ObjModel* model)
   }
 }
 
-// set makeprg=cd\ ..\ &&\ make\ run\ >/dev/null
-// vim: set spell spelllang=pt_br :
+void UpdateGameStartScreen(GLFWwindow* window, double delta_time)
+{
+    static constexpr float text_scale = 4.0f;
+    static std::vector<std::string> options = { "Play", "Exit" };
+	static int32_t selected_option = 0;
+	static bool is_key_just_pressed = false;
+    static float time_since_last_press = 0.0f;
 
+    if (is_key_just_pressed)
+    {
+        time_since_last_press += delta_time;
+        if (time_since_last_press >= 0.25f)
+        {
+            time_since_last_press = 0.0f;
+            is_key_just_pressed = false;
+        }
+    }
+
+    if(keys[GLFW_KEY_UP] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option - 1 + options.size()) % options.size();
+        is_key_just_pressed = true;
+    }
+    else if (keys[GLFW_KEY_DOWN] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option + 1) % options.size();
+        is_key_just_pressed = true;
+    }
+    if (keys[GLFW_KEY_ENTER] && !is_key_just_pressed)
+    {
+        if (selected_option == 0)
+        {
+			g_is_on_game_start = false;
+            g_is_playing_countdown = true;
+        }
+        else if(selected_option == 1)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    }
+
+    for(int32_t i = 0; i < options.size(); i++)
+    {
+        if(i == selected_option)
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
+        }
+        else
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), 0.1f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
+        }
+	}
+}
+
+void UpdateGameOverScreen(GLFWwindow* window, double delta_time, const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track)
+{
+    static constexpr float text_scale = 4.0f;
+    static std::vector<std::string> options = { "Play Again", "Exit" };
+    static int32_t selected_option = 0;
+    static bool is_key_just_pressed = false;
+    static float time_since_last_press = 0.0f;
+
+    if (is_key_just_pressed)
+    {
+        time_since_last_press += delta_time;
+        if (time_since_last_press >= 0.25f)
+        {
+            time_since_last_press = 0.0f;
+            is_key_just_pressed = false;
+        }
+    }
+    if(keys[GLFW_KEY_UP] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option - 1 + options.size()) % options.size();
+        is_key_just_pressed = true;
+    }
+    else if (keys[GLFW_KEY_DOWN] && !is_key_just_pressed)
+    {
+        selected_option = (selected_option + 1) % options.size();
+        is_key_just_pressed = true;
+    }
+    if (keys[GLFW_KEY_ENTER] && !is_key_just_pressed)
+    {
+        if (selected_option == 0)
+        {
+            RestartGame(cars, track);
+			g_is_game_over = false;
+            g_is_playing_countdown = true;
+        }
+        else if(selected_option == 1)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    }
+
+    int32_t num_winners = 0;
+    int32_t player_index = 0;
+    for (std::shared_ptr<Car> car : cars)
+    {
+        if (car->laps_completed == g_num_laps)
+        {
+            static constexpr float winner_msg_scale = 6.0f;
+            std::string winner_msg = std::format("Player {} WON!", player_index);
+            TextRendering_PrintString(
+                window, winner_msg, 
+                0.0f - (TextRendering_CharWidth(window) * (winner_msg.size() / 2) * winner_msg_scale), 
+                0.5f - (num_winners * (TextRendering_LineHeight(window)) * winner_msg_scale), 
+                winner_msg_scale);
+
+            ++num_winners;
+        }
+        ++player_index;
+    }
+    
+    for (int32_t i = 0; i < options.size(); i++)
+    {
+        if (i == selected_option)
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), -0.35f - (i * 0.2f), text_scale, { 0.65f, 0.2f, 0.1f });
+        }
+        else
+        {
+            TextRendering_PrintString(window, options[i], 0.0f - (TextRendering_CharWidth(window) * (options[i].size() / 2) * text_scale), -0.35f - (i * 0.2f), text_scale, { 0.0f, 0.0f, 0.0f });
+        }
+    }
+}
+
+void RestartGame(const std::vector<std::shared_ptr<Car>>& cars, std::shared_ptr<Track> track)
+{
+    for (int32_t i = 0; i < cars.size(); ++i)
+    {
+        std::shared_ptr<Car> car = cars[i];
+		car->speed = 0.0f;
+		car->yaw_tremble_timer = 0.0f;
+        car->is_accelerating = false;
+		car->is_out_of_control = false;
+        car->cur_curve_point = g_init_curve_point;
+        car->cur_lane = i;
+        car->target_lane = i;
+        car->cur_curve_pos = track->lanes[car->cur_lane].at(car->cur_curve_point);
+        car->transition_curve_pos = car->cur_curve_pos;
+        car->laps_completed = 0;
+
+        UpdateCarInputAndAnimation(0, car, track);
+    }
+
+    UpdateCountdownCamera(g_countdown_time);
+}
+
+void UpdateFreeCamera(double delta_time)
+{
+    // Camera rotation update
+    camera_yaw -= float(g_mouse_cursor_delta_x) * camera_rotation_speed;
+    camera_pitch += float(g_mouse_cursor_delta_y) * camera_rotation_speed;
+
+    camera_yaw = fmod(camera_yaw, glm::two_pi<float>());
+    camera_pitch = std::clamp(camera_pitch, -glm::half_pi<float>() + 0.01f, glm::half_pi<float>() - 0.01f);
+
+    camera_forward.x = cosf(camera_pitch) * cosf(camera_yaw);
+    camera_forward.y = sinf(camera_pitch);
+    camera_forward.z = cosf(camera_pitch) * sinf(camera_yaw);
+    camera_forward = glm::normalize(camera_forward);
+
+    camera_right = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_forward), { 0.0f, 1.0f, 0.0f })), 0.0f);
+    camera_up = glm::vec4(glm::normalize(glm::cross(glm::vec3(camera_right), glm::vec3(camera_forward))), 0.0f);
+
+    g_mouse_cursor_delta_x = 0.0f;
+    g_mouse_cursor_delta_y = 0.0f;
+
+    // Camera movement update
+    if (keys[GLFW_KEY_W])
+    {
+        camera_position += camera_forward * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_S])
+    {
+        camera_position -= camera_forward * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_D])
+    {
+        camera_position += camera_right * float(camera_move_speed * delta_time);
+    }
+    if (keys[GLFW_KEY_A])
+    {
+        camera_position -= camera_right * float(camera_move_speed * delta_time);
+    }
+}
+
+void UpdateRaceCamera(double delta_time, const std::vector<std::shared_ptr<Car>>& cars)
+{
+    if (cars.empty())
+        return;
+
+    //------------------------------------------------------
+    // Tunable parameters
+    //------------------------------------------------------
+
+    constexpr float fixed_yaw = glm::radians(-75.0f);
+    constexpr float fixed_pitch = glm::radians(-35.0f);
+
+    constexpr float min_distance = 6.0f;
+    constexpr float max_distance = 14.0f;
+    constexpr float zoom_factor = 2.4f;
+
+    constexpr float follow_speed = 6.0f;
+    constexpr float look_speed = 8.0f;
+
+    //------------------------------------------------------
+    // Compute center of all cars
+    //------------------------------------------------------
+
+    glm::vec3 target_center(0.0f);
+
+    for (const auto& car : cars)
+    {
+        target_center += glm::vec3(car->root->position);
+    }
+
+    target_center /= float(cars.size());
+
+    //------------------------------------------------------
+    // Measure cars spread
+    //------------------------------------------------------
+
+    float max_distance_from_center = 0.0f;
+
+    for (const auto& car : cars)
+    {
+        float d = glm::distance(glm::vec3(car->root->position), target_center);
+
+        max_distance_from_center = std::max(max_distance_from_center, d);
+    }
+
+    //------------------------------------------------------
+    // Camera forward from fixed rotation
+    //------------------------------------------------------
+
+    glm::vec3 forward;
+
+    forward.x = cosf(fixed_pitch) * cosf(fixed_yaw);
+    forward.y = sinf(fixed_pitch);
+    forward.z = cosf(fixed_pitch) * sinf(fixed_yaw);
+
+    forward = glm::normalize(forward);
+
+    //------------------------------------------------------
+    // Zoom based on spread
+    //------------------------------------------------------
+
+    float target_distance =
+        min_distance +
+        max_distance_from_center * zoom_factor;
+
+    target_distance =  std::clamp(target_distance, min_distance, max_distance);
+
+    //------------------------------------------------------
+    // Compute target camera position
+    //------------------------------------------------------
+
+    glm::vec3 target_position = target_center - forward * target_distance;
+
+    //------------------------------------------------------
+    // Smooth camera motion
+    //------------------------------------------------------
+
+    float position_t = 1.0f - expf(-follow_speed * float(delta_time));
+
+    camera_position =
+        glm::mix(
+            glm::vec4(camera_position),
+            glm::vec4(target_position, 1.0f),
+            position_t);
+
+    //------------------------------------------------------
+    // Camera orientation always looks at pack center
+    //------------------------------------------------------
+
+    glm::vec3 look_dir = glm::normalize(target_center - glm::vec3(camera_position));
+
+    camera_forward = glm::vec4(look_dir, 0.0f);
+
+    camera_right =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_forward),
+                    glm::vec3(0, 1, 0))),
+            0.0f);
+
+    camera_up =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_right),
+                    glm::vec3(camera_forward))),
+            0.0f);
+}
+
+void UpdateCountdownCamera(float normalized_countdown_time)
+{
+    constexpr glm::vec4 init_camera_position = { 1.62f, 0.52f, 8.88f, 1.0f };
+    constexpr float init_camera_pitch = glm::radians<float>(-20.91);
+    constexpr float init_camera_yaw = glm::radians<float>(-24.11);
+
+    constexpr glm::vec4 end_camera_position = { -1.41f, 3.94f, 14.43f, 1.0f };
+    constexpr float end_camera_pitch = glm::radians<float>(-12.6);
+    constexpr float end_camera_yaw = glm::radians<float>(-79.4);
+
+    normalized_countdown_time = glm::clamp(normalized_countdown_time, 0.0f, 1.0f);
+
+    //--------------------------------------------------
+    // Smooth cinematic easing
+    //--------------------------------------------------
+
+    float t = normalized_countdown_time;
+
+    // cubic ease-in-out
+    t = t * t * (3.0f - 2.0f * t);
+
+    //--------------------------------------------------
+    // Position interpolation
+    //--------------------------------------------------
+
+    camera_position =
+        glm::mix(
+            init_camera_position,
+            end_camera_position,
+            t);
+
+    //--------------------------------------------------
+    // Angle interpolation
+    //--------------------------------------------------
+
+    float pitch = glm::mix(init_camera_pitch, end_camera_pitch, t);
+
+    float yaw = glm::mix(init_camera_yaw, end_camera_yaw, t);
+
+    //--------------------------------------------------
+    // Build forward vector
+    //--------------------------------------------------
+
+    camera_forward.x = cosf(pitch) * cosf(yaw);
+
+    camera_forward.y = sinf(pitch);
+
+    camera_forward.z = cosf(pitch) * sinf(yaw);
+
+    camera_forward.w = 0.0f;
+
+    camera_forward = glm::normalize(camera_forward);
+
+    //--------------------------------------------------
+    // Rebuild camera basis
+    //--------------------------------------------------
+
+    camera_right =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_forward),
+                    glm::vec3(0, 1, 0))),
+            0.0f);
+
+    camera_up =
+        glm::vec4(
+            glm::normalize(
+                glm::cross(
+                    glm::vec3(camera_right),
+                    glm::vec3(camera_forward))),
+            0.0f);
+}
+
+void DrawEntity(const std::shared_ptr<Entity> entity)
+{
+    const std::vector<std::shared_ptr<MeshComp>>& mesh_components = g_entities_virtual_meshes[entity->GetId()];
+
+    if (mesh_components.empty()) return;
+
+    auto draw_shape = [&](std::shared_ptr<MeshComp> mesh_comp)
+        {
+            std::shared_ptr<ObjModel> model_to_draw = mesh_comp->model;
+            const tinyobj::shape_t& shape = model_to_draw->shapes[mesh_comp->submesh_index];
+
+            glm::mat4 local_comp_transform_mat = matops::MatrixIdentity();
+
+			auto transform_components = mesh_comp->GetComponentsByType<TransformComp>();
+
+            if (!transform_components.empty())
+            {
+                glm::vec3 center = (mesh_comp->bbox_min + mesh_comp->bbox_max) / 2.0f;
+                std::shared_ptr<TransformComp> transform_component = transform_components[0];
+                local_comp_transform_mat = matops::MatrixTranslate(center.x, center.y, center.z)
+                    * matops::MatrixTranslate(transform_component->position.x, transform_component->position.y, transform_component->position.z)
+                    * matops::MatrixRotateZ(glm::radians(transform_component->rotation.z))
+                    * matops::MatrixRotateY(glm::radians(transform_component->rotation.y))
+                    * matops::MatrixRotateX(glm::radians(transform_component->rotation.x))
+					* matops::MatrixScale(transform_component->scale.x, transform_component->scale.y, transform_component->scale.z)
+                    * matops::MatrixTranslate(-center.x, -center.y, -center.z);
+            }
+
+            glm::mat4 model = matops::MatrixTranslate(entity->root->position.x, entity->root->position.y, entity->root->position.z)
+                * matops::MatrixRotateX(glm::radians(entity->root->rotation.x))
+                * matops::MatrixRotateY(glm::radians(entity->root->rotation.y))
+                * matops::MatrixRotateZ(glm::radians(entity->root->rotation.z))
+                * matops::MatrixScale(entity->root->scale.x, entity->root->scale.y, entity->root->scale.z)
+                * local_comp_transform_mat;
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+
+            glActiveTexture(GL_TEXTURE0);
+            int material_idx = shape.mesh.material_ids[0];
+            const auto& textures_ids_it = model_to_draw->textures_ids.find(material_idx);
+            bool has_any_texture = (textures_ids_it != model_to_draw->textures_ids.end());
+            if (has_any_texture && textures_ids_it->second.diffuse_id != max_int32)
+            {
+                glUniform1i(g_has_kd_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.diffuse_id);
+            }
+            else
+            {
+                glUniform1i(g_has_kd_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (has_any_texture && textures_ids_it->second.emissive_id != max_int32)
+            {
+                glUniform1i(g_has_ke_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.emissive_id);
+            }
+            else
+            {
+                glUniform1i(g_has_ke_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE1);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            if (has_any_texture && textures_ids_it->second.opacity_id != max_int32)
+            {
+                glUniform1i(g_has_opacity_texture_uniform, true);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, textures_ids_it->second.opacity_id);
+            }
+            else
+            {
+                glUniform1i(g_has_opacity_texture_uniform, false);
+
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+
+            const auto& mat = mesh_comp->material;
+            glUniform3f(g_kd_uniform, mat.albedo[0], mat.albedo[1], mat.albedo[2]);
+            glUniform3f(g_ks_uniform, mat.specular[0], mat.specular[1], mat.specular[2]);
+            glUniform3f(g_ke_uniform, mat.emissive[0], mat.emissive[1], mat.emissive[2]);
+            glUniform1f(g_ns_uniform, mat.shininess);
+            glUniform1f(g_opacity_uniform, mat.opacity);
+
+            DrawVirtualMesh(mesh_comp);
+        };
+
+    //std::map<float, const tinyobj::shape_t*> transparent_shapes;
+    std::vector<std::shared_ptr<MeshComp>> transparent_objects;
+
+    // OPAQUE PASS
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+
+    for (const auto& mesh_comp : mesh_components)
+    {
+        std::shared_ptr<ObjModel> model_to_draw = mesh_comp->model;
+		const auto& shape = model_to_draw->shapes[mesh_comp->submesh_index];
+
+        int material_idx = shape.mesh.material_ids[0];
+        const auto& mat = model_to_draw->materials[material_idx];
+        const auto& textures_ids_it = model_to_draw->textures_ids.find(material_idx);
+        bool is_transparent = (mat.dissolve < 0.999f) ||
+            (textures_ids_it != model_to_draw->textures_ids.end() && textures_ids_it->second.opacity_id != max_int32);
+        if (is_transparent)
+        {
+            transparent_objects.push_back(mesh_comp);
+        }
+        else
+        {
+            draw_shape(mesh_comp);
+        }
+    }
+
+    // TRANSPARENT PASS
+    glEnable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+
+    for (const auto& scene_obj_comp : mesh_components)
+    {
+        std::shared_ptr<ObjModel> model_to_draw = scene_obj_comp->model;
+        const auto& shape = model_to_draw->shapes[scene_obj_comp->submesh_index];
+
+        draw_shape(scene_obj_comp);
+    }
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0); // unbind
+}
+
+void UpdateRaceUserInterface(GLFWwindow* window, const std::vector<std::shared_ptr<Car>>& cars)
+{
+    static const std::vector<glm::vec2> screen_pos_players_info{
+        { -0.9, 0.88 }, { 0.9, 0.88 }
+    };
+
+    static constexpr float text_scale = 1.5f;
+    for (int32_t i = 0; i < cars.size(); ++i)
+    {
+        glm::vec2 info_pos = screen_pos_players_info[i];
+        std::string player_text = std::format("Player {}: {}/{}", i, cars[i]->laps_completed, g_num_laps);
+        info_pos.x -= info_pos.x > 0 ? TextRendering_CharWidth(window) * player_text.size() * text_scale : 0;
+        TextRendering_PrintString(window, player_text, info_pos.x, info_pos.y, text_scale);
+    }
+}
+
+std::vector<std::shared_ptr<MeshComp>> CreateMeshComponentsForModelByName(const std::string& model_name)
+{
+	std::vector<std::shared_ptr<MeshComp>> result;
+
+    auto it = g_loaded_models.find(model_name);
+
+	if (it == g_loaded_models.end()) return result;
+
+	std::shared_ptr<ObjModel> model = it->second;
+
+    for(int32_t shape_index = 0; shape_index < model->shapes.size(); ++shape_index)
+    {
+        std::shared_ptr<MeshComp> mesh_comp = std::make_shared<MeshComp>();
+        mesh_comp->mesh_name = model->shapes[shape_index].name;
+        mesh_comp->first_index    = model->first_indices[shape_index]; // Primeiro índice
+        mesh_comp->num_indices    = model->num_indices[shape_index]; // Número de indices
+        mesh_comp->rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
+        mesh_comp->vertex_array_object_id = model->vertex_array_object_ids[shape_index];
+
+        mesh_comp->bbox_min = model->bboxes_min[shape_index];;
+        mesh_comp->bbox_max = model->bboxes_max[shape_index];;
+
+        mesh_comp->model = model;
+        mesh_comp->submesh_index = shape_index;
+
+        tinyobj::material_t shape_mat = model->materials[model->shapes[shape_index].mesh.material_ids[0]];
+
+        mesh_comp->material.name = shape_mat.name;
+		mesh_comp->material.albedo = { shape_mat.diffuse[0], shape_mat.diffuse[1], shape_mat.diffuse[2] };
+		mesh_comp->material.specular = { shape_mat.specular[0], shape_mat.specular[1], shape_mat.specular[2] };
+		mesh_comp->material.emissive = { shape_mat.emission[0], shape_mat.emission[1], shape_mat.emission[2] };
+		mesh_comp->material.shininess = shape_mat.shininess;
+		mesh_comp->material.opacity = shape_mat.dissolve;
+
+		result.push_back(mesh_comp);
+	}
+
+    return result;
+}
+
+std::shared_ptr<Car> CreateCar(const std::string& name, const std::shared_ptr<ObjModel>& model, const std::array<int32_t, 4>& input_keys, glm::vec3 color)
+{
+    std::shared_ptr<Car> car = std::make_shared<Car>(name);
+    car->AddComponents(CreateMeshComponentsForModelByName(model->filepath));
+    g_entities_virtual_meshes.emplace(car->GetId(), car->GetComponentsByType<MeshComp>());
+    car->root->scale = { 0.25f, 0.25f, 0.25f };
+
+    car->input_keys = input_keys;
+    car->wheels_mesh_comps = {};
+    car->wheels_transform_comps = {};
+
+    for (std::shared_ptr<MeshComp> mesh_comp : car->GetComponentsByType<MeshComp>())
+    {
+        if (mesh_comp->mesh_name.find("Wheel.") != std::string::npos)
+        {
+            car->wheels_transform_comps.push_back(mesh_comp->AttachComponent<TransformComp>());
+            car->wheels_mesh_comps.push_back(mesh_comp);
+        }
+        if (mesh_comp->mesh_name.find("_23") != std::string::npos)
+        {
+            mesh_comp->material.albedo = color;
+        }
+    }
+
+    return car;
+}
+
+void UpdateCarTransformOnTrack(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+    if (car->cur_lane != car->target_lane)
+    {
+        car->lane_transitioning_length += car->speed * (float)delta_time;
+
+        if (car->lane_transitioning_length >= g_lane_transitioning_length)
+        {
+            car->cur_lane = car->target_lane;
+            car->lane_transitioning_length = 0.0f;
+            car->cur_curve_pos = car->transition_curve_pos;
+        }
+    }
+
+    const auto& track_points = track->lanes[car->cur_lane];
+    // Car animation path update
+    int32_t next_point = (car->cur_curve_point + 1) % track_points.size();
+    glm::vec3 car_forward;
+    while (true)
+    {
+        car_forward = glm::normalize(track_points[next_point] - track_points[car->cur_curve_point]);
+        glm::vec3 new_curve_pos = car->cur_curve_pos + car->speed * (float)delta_time * car_forward;
+
+        if (glm::dot(car_forward, track_points[next_point] - new_curve_pos) < 0)
+        {
+            if (next_point == (g_init_curve_point - 1))
+            {
+                g_is_game_over = (++car->laps_completed == g_num_laps);
+                g_is_game_running = !g_is_game_over;
+            }
+            next_point = (next_point + 1) % track_points.size();
+            new_curve_pos = car->cur_curve_pos;
+        }
+        else
+        {
+            car->cur_curve_pos = new_curve_pos;
+            car->transition_curve_pos = new_curve_pos;
+            car->cur_curve_point = next_point - 1;
+            if (car->cur_curve_point < 0 || car->cur_curve_point >= track_points.size())
+                car->cur_curve_point = 0;
+            break;
+        }
+    }
+
+    const float transition_progress = car->lane_transitioning_length / g_lane_transitioning_length;
+    const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
+
+    if (car->cur_lane != car->target_lane)
+    {
+        const auto& transitioning_lane_points = track->lanes[car->target_lane];
+        glm::vec3 lanes_points_diff = transitioning_lane_points[car->cur_curve_point] - track_points[car->cur_curve_point];
+        car->transition_curve_pos += lanes_points_diff * std::clamp((car->lane_transitioning_length / g_lane_transitioning_length), 0.0f, 1.0f);
+
+        glm::vec3 steering_forward = glm::normalize(transitioning_lane_points[(car->cur_curve_point + size_t(track->lane_lengths[car->target_lane] / g_lane_transitioning_length) * 2) % track_points.size()] - track_points[car->cur_curve_point]);
+        car_forward = glm::normalize(
+            steering_forward * std::abs(left_right_rotation_factor) +
+            car_forward * (1.0f - std::abs(left_right_rotation_factor)));
+    }
+
+    float theta = glm::degrees(acos(glm::dot({ 0.0f, 0.0f, 1.0f }, car_forward)));
+    if (car_forward.x < 0)
+        theta = glm::degrees(glm::two_pi<float>()) - theta;
+
+    float phi = glm::degrees(asin(glm::dot({ 0.0f, 1.0f, 0.0f }, car_forward)));
+    if (car_forward.z > 0)
+        phi = glm::degrees(glm::two_pi<float>()) - phi;
+
+    glm::vec3 world_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 car_right = glm::normalize(glm::cross(world_up, car_forward));
+    glm::vec3 car_up = glm::normalize(glm::cross(car_forward, car_right));
+    float roll = glm::degrees(atan2(glm::dot(car_right, world_up), glm::dot(car_up, world_up)));
+
+    glm::vec3 car_world_rotation = { phi, theta, roll };
+
+    glm::mat4 model = matops::MatrixIdentity(); // Transformação identidade de modelagem
+    model *= matops::MatrixScale(track->root->scale.x, track->root->scale.y, track->root->scale.z);
+    glm::vec3 car_world_pos = model * glm::vec4(car->transition_curve_pos, 1.0f);
+
+    car->root->position = car_world_pos;
+    car->root->rotation = car_world_rotation;
+    car->forward = car_forward;
+}
+
+void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+    static constexpr float max_car_speed = 50.0f;
+    static constexpr float car_acceleration = 16.0f;
+    static constexpr float asphalt_friction = 0.7f;
+
+	const float transition_progress = car->lane_transitioning_length / g_lane_transitioning_length;
+	const float transitioning_lane_length = track->normalized_lane_lengths[car->cur_lane] * (1 - transition_progress) +
+        track->normalized_lane_lengths[car->target_lane] * transition_progress;
+
+    car->is_accelerating = false;
+    if (keys[car->input_keys.at(0)] && !car->is_out_of_control)
+    {
+        car->speed += car_acceleration * transitioning_lane_length * float(delta_time);
+        car->is_accelerating = true;
+    }
+    else if (keys[car->input_keys.at(1)] && !car->is_out_of_control)
+    {
+        car->speed -= car_acceleration * transitioning_lane_length * float(delta_time);
+    }
+
+	float destabilization_factor = car->is_out_of_control ? 0.35f : 0.0f;
+    car->speed *= powf(asphalt_friction - destabilization_factor, float(delta_time));
+
+    car->speed = std::clamp(car->speed, 0.0f, max_car_speed * transitioning_lane_length);
+
+    if (keys[car->input_keys.at(2)] && !car->is_out_of_control && car->cur_lane == car->target_lane)
+    {
+		car->target_lane = std::max(0, car->target_lane - 1);
+    }
+    else if (keys[car->input_keys.at(3)] && !car->is_out_of_control && car->cur_lane == car->target_lane)
+    {
+		car->target_lane = std::min(int32_t(track->lanes.size() - 1), car->target_lane + 1);
+    }
+
+	UpdateCarTransformOnTrack(delta_time, car, track);
+
+    const float left_right_rotation_factor = (car->target_lane - car->cur_lane) * (1.0f - std::powf(std::abs(transition_progress - 0.5f) * 2.0f, 2.0f));
+
+    // Car wheels animation update
+    for (int32_t i = 0; i < car->wheels_mesh_comps.size(); ++i)
+    {
+        std::shared_ptr<MeshComp> mesh_comp = car->wheels_mesh_comps[i];
+        std::shared_ptr<TransformComp> wheel_transform_comp = car->wheels_transform_comps[i];
+        float radius = (mesh_comp->bbox_max.y - mesh_comp->bbox_min.y) * 0.5f * car->root->scale.y;
+        wheel_transform_comp->rotation.x += glm::degrees((car->speed / radius) * float(delta_time));
+        if(mesh_comp->mesh_name.find("Ft") != std::string::npos)
+            wheel_transform_comp->rotation.y = 35.0f * left_right_rotation_factor;
+    }
+
+	// Car destabilization update
+    float car0_ratio = ComputeCarSpeedRelativeToTrackCurvature(car, track);
+
+    static constexpr float warning_threshold = 0.6f;
+    static constexpr float skid_threshold = 1.10f;
+    car->yaw_tremble_timer += delta_time;
+
+    float yaw_offset = 0.0f;
+
+    if (!car->is_out_of_control)
+    {
+        if (car0_ratio > warning_threshold && car0_ratio <= skid_threshold)
+        {
+            float t = ((car0_ratio - warning_threshold) / (skid_threshold - warning_threshold)) + 0.25f;
+
+            t = glm::clamp(t, 0.0f, 1.0f);
+
+            // stronger near the limit
+            //t = t * t;
+
+            static constexpr float max_warning_tremble = 12.0f;
+            static constexpr float warning_frequency = 16.0f;
+
+            yaw_offset = max_warning_tremble * t * sinf(car->yaw_tremble_timer * warning_frequency);
+        }
+        else if (car0_ratio > skid_threshold && car->is_accelerating)
+        {
+            car->is_accelerating = false;
+            car->is_out_of_control = true;
+            car->out_of_control_timer = 0.0f;
+        }
+    }
+    else
+    {
+        static constexpr float skid_tremble = 16.0f;
+        static constexpr float skid_frequency = 25.0f;
+
+        yaw_offset = skid_tremble * sinf(car->yaw_tremble_timer * skid_frequency);
+
+        car->out_of_control_timer += delta_time;
+
+        static constexpr float destabilization_duration = 2.0f;
+        if (car->out_of_control_timer >= destabilization_duration)
+        {
+            car->is_out_of_control = false;
+            car->out_of_control_timer = 0.0f;
+        }
+    }
+
+    car->root->rotation.y += yaw_offset;
+}
+
+void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track)
+{
+	std::vector<Obb> cars_obbs;
+
+    auto create_car_obb = [&](std::shared_ptr<Car> car) {
+        glm::mat4 model_transform = matops::MatrixTranslate(car->root->position.x, car->root->position.y, car->root->position.z)
+            * matops::MatrixRotateX(glm::radians(car->root->rotation.x))
+            * matops::MatrixRotateY(glm::radians(car->root->rotation.y))
+            * matops::MatrixRotateZ(glm::radians(car->root->rotation.z))
+            * matops::MatrixScale(car->root->scale.x, car->root->scale.y, car->root->scale.z);
+        std::shared_ptr<ObjModel> car_model = g_entities_virtual_meshes[car->GetId()].front()->model;
+        return CreateObb(*car_model, model_transform);
+		};
+
+    for (std::shared_ptr<Car> car : cars)
+    {   
+		cars_obbs.push_back(create_car_obb(car));
+    }
+
+    auto handle_lane_switch = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind) {
+        if(car_in_front->target_lane == car_behind->target_lane)
+        {
+            if(car_behind->target_lane != car_behind->cur_lane)
+            {
+                car_behind->lane_transitioning_length = std::max(g_lane_transitioning_length - car_behind->lane_transitioning_length, 0.0f);
+				std::swap(car_behind->target_lane, car_behind->cur_lane);
+                car_behind->cur_curve_pos = track->lanes[car_behind->cur_lane].at(car_behind->cur_curve_point);
+            }
+            else
+            {
+                car_behind->target_lane = car_behind->cur_lane >= track->lanes.size() - 1 ? car_behind->cur_lane - 1 : car_behind->cur_lane + 1;
+                car_behind->lane_transitioning_length = 0.0f;
+            }
+        }
+
+        if (!car_in_front->is_out_of_control)
+        {
+            car_in_front->is_accelerating = false;
+            car_in_front->is_out_of_control = true;
+            car_in_front->out_of_control_timer = 0.0f;
+        }
+        };
+
+    auto handle_collision_overlap = [&](std::shared_ptr<Car> car_in_front, std::shared_ptr<Car> car_behind)
+        {
+			Obb car_in_front_obb = create_car_obb(car_in_front);
+			Obb car_behind_obb = create_car_obb(car_behind);
+
+			float temp_speed = car_in_front->speed;
+            while(Intersects(car_in_front_obb, car_behind_obb))
+            {
+                car_in_front->speed = car_behind->speed;
+                UpdateCarTransformOnTrack(0.01f, car_in_front, track);
+                car_in_front_obb = create_car_obb(car_in_front);
+            }
+
+			car_in_front->speed = temp_speed;
+        };
+
+
+    for (int32_t i = 0; i < cars.size() - 1; ++i)
+    {
+        std::shared_ptr<Car> this_car = cars[i];
+        const Obb& this_car_obb = cars_obbs[i];
+
+        for (int32_t j = i + 1; j < cars.size(); ++j)
+        {
+            std::shared_ptr<Car> other_car = cars[j];
+            const Obb& other_car_obb = cars_obbs[j];
+
+            // if aabbs not overlap continue
+            if (!Intersects(this_car_obb, other_car_obb)) continue;
+
+			const glm::vec3& this_car_pos = this_car->root->position;
+			const glm::vec3& other_car_pos = other_car->root->position;
+
+			const glm::vec3 diff_other_to_this = other_car_pos - this_car_pos;
+
+            // if this car is behind
+            if (glm::dot(diff_other_to_this, this_car->forward) > 0.0f)
+            {
+                if (!this_car->is_out_of_control && !other_car->is_out_of_control)
+                    handle_lane_switch(other_car, this_car);
+                handle_collision_overlap(other_car, this_car);
+            }
+            // if the other car is behind
+            else if (glm::dot(diff_other_to_this, other_car->forward) < 0.0f)
+            {
+                if (!this_car->is_out_of_control && !other_car->is_out_of_control)
+                    handle_lane_switch(this_car, other_car);
+                handle_collision_overlap(this_car, other_car);
+            }
+        }
+    }
+}
+
+std::vector<std::vector<glm::vec3>> SplitCurvePathInLanes(const std::vector<glm::vec3>& points, int32_t num_lanes)
+{
+    std::vector<std::vector<glm::vec3>> lanes;
+
+    lanes.resize(num_lanes);
+
+    constexpr float lane_width = 3.5f;
+    const float track_width = (num_lanes - 1) * lane_width;
+
+    for (int32_t l = 0; l < num_lanes; ++l)
+    {
+        lanes[l].reserve(points.size());
+
+        float lane_width_coord = l * (track_width / (num_lanes - 1)) - (track_width / 2);
+
+        for (int32_t p = 0; p < points.size() - 1; ++p)
+        {
+            const glm::vec3& point = points[p];
+            const glm::vec3& next_point = points[p + 1];
+
+            glm::vec3 forward = glm::normalize(next_point - point);
+            glm::vec3 right = glm::cross(glm::vec3(0, 1, 0), forward);
+            glm::vec3 offset = right * lane_width_coord;
+            lanes[l].push_back(point + offset);
+        }
+        const glm::vec3& point = points[points.size() - 1];
+        const glm::vec3& next_point = points[0];
+
+        glm::vec3 forward = glm::normalize(next_point - point);
+        glm::vec3 right = glm::cross(glm::vec3(0, 1, 0), forward);
+        glm::vec3 offset = right * lane_width_coord;
+        lanes[l].push_back(point + offset);
+    }
+
+    return lanes;
+}
+
+std::vector<float> ComputeLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
+{
+    std::vector<float> lane_lengths;
+    lane_lengths.reserve(lanes.size());
+
+    for (const auto& lane : lanes)
+    {
+        float lane_length = 0.0f;
+        for (int32_t p = 0; p < lane.size() - 1; ++p)
+        {
+            lane_length += glm::distance(lane[p], lane[p + 1]);
+        }
+        lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
+        lane_lengths.push_back(lane_length);
+    }
+
+    return lane_lengths;
+}
+
+std::vector<float> ComputeNormalizedLaneLengths(const std::vector<std::vector<glm::vec3>>& lanes)
+{
+	std::vector<float> normalized_lane_lengths;
+	normalized_lane_lengths.reserve(lanes.size());
+
+    float min_lane_length = std::numeric_limits<float>::max();
+    for(const auto& lane : lanes)
+    {
+        float lane_length = 0.0f;
+        for (int32_t p = 0; p < lane.size() - 1; ++p)
+        {
+            lane_length += glm::distance(lane[p], lane[p + 1]);
+        }
+        lane_length += glm::distance(lane[lane.size() - 1], lane[0]);
+        normalized_lane_lengths.push_back(lane_length);
+        min_lane_length = std::min(min_lane_length, lane_length);
+	}
+
+    for(float& lane_length : normalized_lane_lengths)
+    {
+        lane_length /= min_lane_length;
+	}
+
+    return normalized_lane_lengths;
+}
+
+float ComputeCurveRadius(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2)
+{
+    float a = glm::length(p1 - p0);
+    float b = glm::length(p2 - p1);
+    float c = glm::length(p2 - p0);
+
+    float area2 = glm::length(glm::cross(p1 - p0, p2 - p0));
+
+    if (area2 < 0.0001f)
+        return FLT_MAX; // almost straight line
+
+    return (a * b * c) / area2;
+}
+
+float ComputeCarSpeedRelativeToTrackCurvature(std::shared_ptr<Car> car, std::shared_ptr<Track> track)
+{
+    const auto& points = track->lanes[car->cur_lane];
+
+    int count = (int)points.size();
+
+    int i0 = (car->cur_curve_point - 1 + count) % count;
+    int i1 = car->cur_curve_point;
+    int i2 = (car->cur_curve_point + 1) % count;
+
+    float radius = ComputeCurveRadius(
+        points[i0],
+        points[i1],
+        points[i2]);
+
+    if (radius == FLT_MAX)
+        return 0.0f;
+
+    float lateral_accel = (car->speed * car->speed) / radius;
+
+    static constexpr float grip_limit = 32.0f;
+
+    return lateral_accel / grip_limit;
+}
