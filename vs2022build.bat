@@ -20,7 +20,7 @@ cmake -B build\vs2022 -S . -G "Visual Studio 17 2022" -A x64
 echo.
 echo ========================================
 echo Done!
-echo You can now open: build\LAB_FCG.sln
+echo You can now open: build\SlotcarGame.sln
 echo ========================================
 
 pause

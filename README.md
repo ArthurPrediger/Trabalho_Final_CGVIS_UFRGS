@@ -48,4 +48,32 @@ IAs generativas foram utilizadas no desenvolvimento de funcionalidades e aspecto
 
 ## 6. Explicação de Passos para Compilação
 
+### Requerimento para todos os SOs
+
+Um compilador com suporte a versão 20 do C++.
+
+### Windows com MSVC
+A versão padrão de desenvolvimento do jogo foi feita em Windows utilizando o MSVC na sua versão presente na IDE Visual Studio 2022 para compilação da aplicação. Para compilar o jogo por esse método basta:
+
+1. Executar o arquivo [vs2022build.bat](vs2022build.bat); 
+
+2. Abrir a solução do Visual Studio 2022 gerada no caminho 'build/vs2022/SlotcarGame.sln';
+
+3. Compilar o projeto 'main' em versão de Release que gerará o executável no caminho 'bin/Release/main.exe'.
+
+### Linux com Makefile
+Abra um terminal, navegue até a pasta onde está este código fonte, e execute o comando "make" para compilar. Para executar o código compilado, execute o comando "make run".
+
+### Linux com VSCode
+
+1. Instale o VSCode seguindo as instruções em https://code.visualstudio.com/ .
+
+2. Instale as extensões "ms-vscode.cpptools" e "ms-vscode.cmake-tools" no VSCode. Se você abrir o diretório deste projeto no VSCode, automaticamente será sugerida a instalação destas extensões (pois estão listadas no arquivo ".vscode/extensions.json").
+
+3. Clique no botão de "Play" NA BARRA INFERIOR do VSCode para compilar e executar o projeto. Na primeira compilação, a extensão do CMake para o VSCode irá perguntar qual compilador você quer utilizar. Selecione da lista o compilador que você deseja utilizar.
+
+Veja mais instruções de uso do CMake no VSCode em:
+
+https://github.com/microsoft/vscode-cmake-tools/blob/main/docs/README.md
+
 ## 7. Link de Vídeo do Jogo

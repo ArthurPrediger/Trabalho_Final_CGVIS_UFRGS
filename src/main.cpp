@@ -57,41 +57,10 @@
 #include "entity.h"
 #include "curve_path_loader.h"
 #include "matrix_operations.h"
+#include "obj_model.h"
+#include "collisions.h"
 
-constexpr int32_t max_int32 = std::numeric_limits<GLuint>::max();
-
-// Estrutura que representa um modelo geométrico carregado a partir de um
-// arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
-class ObjModel
-{
-public:
-    // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
-    // Veja: https://github.com/syoyo/tinyobjloader
-    ObjModel(const char* filepath, const char* basepath = NULL, bool triangulate = true);
-
-    struct MaterialTexturesIds
-    {
-        int32_t diffuse_id;
-        int32_t emissive_id;
-        int32_t opacity_id;
-    };
-
-    std::string                       filepath;
-    tinyobj::attrib_t                 attrib;
-    std::vector<tinyobj::shape_t>     shapes;
-    std::vector<tinyobj::material_t>  materials;
-    std::unordered_map<uint32_t, MaterialTexturesIds> textures_ids;
-
-    glm::vec3 min_bounds;
-    glm::vec3 max_bounds;
-
-    // Data per submesh/shape
-    std::vector<size_t>       first_indices; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    std::vector<size_t>       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    std::vector<GLuint>       vertex_array_object_ids; // ID do VAO onde estão armazenados os atributos do modelo
-    std::vector<glm::vec3>    bboxes_min; // Axis-Aligned Bounding Box do objeto
-    std::vector<glm::vec3>    bboxes_max;
-};
+constexpr int32_t max_int32 = (std::numeric_limits<int32_t>::max)();
 
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
 //void PushMatrix(glm::mat4 M);
@@ -103,7 +72,6 @@ void BuildTrianglesAndBuffers(std::shared_ptr<ObjModel> model); // Constrói rep
 void ComputeNormals(std::shared_ptr<ObjModel> model); // Computa normais de um ObjModel, caso não existam.
 void DivideModelMeshesByMaterial(std::shared_ptr<ObjModel> model);
 void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-GLuint LoadTextureImage(const char* filename); // Função que carrega imagens de textura
 void DrawVirtualMesh(std::shared_ptr<MeshComp> virtual_mesh_component); // Desenha uma um componente de malha 
 GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
@@ -307,7 +275,7 @@ int main(int argc, char* argv[])
     // Criamos uma janela do sistema operacional, com 800 colunas e 600 linhas
     // de pixels, e com título "INF01047 ...".
     GLFWwindow* window;
-    window = glfwCreateWindow(800, 600, "INF01047 - 00334521 - Arthur Rambo Prediger", NULL, NULL);
+    window = glfwCreateWindow(800, 600, "INF01047 - 00334521 - Arthur Rambo Prediger - SlotcarGame", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -631,54 +599,6 @@ int main(int argc, char* argv[])
 
     // Fim do programa
     return 0;
-}
-
-// Função que carrega uma imagem para ser utilizada como textura
-GLuint LoadTextureImage(const char* filename)
-{
-    printf("Carregando imagem \"%s\"... ", filename);
-
-    // Primeiro fazemos a leitura da imagem do disco
-    stbi_set_flip_vertically_on_load(true);
-    int width;
-    int height;
-    int channels;
-    unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
-
-    if ( data == NULL )
-    {
-        fprintf(stderr, "ERROR: Cannot open image file \"%s\".\n", filename);
-        std::exit(EXIT_FAILURE);
-    }
-
-    printf("OK (%dx%d).\n", width, height);
-
-    // Agora criamos objetos na GPU com OpenGL para armazenar a textura
-    GLuint texture_id;
-    glGenTextures(1, &texture_id);
-
-    // Agora enviamos a imagem lida do disco para a GPU
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    // Texture parameters directly on the texture object (simpler for most cases)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    stbi_image_free(data);
-
-    glBindTexture(GL_TEXTURE_2D, 0);   // unbind
-
-    return texture_id;
 }
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
@@ -1784,92 +1704,6 @@ void PrintObjModelInfo(std::shared_ptr<ObjModel> model)
   }
 }
 
-// set makeprg=cd\ ..\ &&\ make\ run\ >/dev/null
-// vim: set spell spelllang=pt_br :
-
-ObjModel::ObjModel(const char* filepath, const char* basepath, bool triangulate)
-{
-	this->filepath = filepath;
-    printf("Carregando objetos do arquivo \"%s\"...\n", filepath);
-
-    // Se basepath == NULL, então setamos basepath como o dirname do
-    // filename, para que os arquivos MTL sejam corretamente carregados caso
-    // estejam no mesmo diretório dos arquivos OBJ.
-    std::string fullpath(filepath);
-    std::string dirname;
-    if (basepath == NULL)
-    {
-        auto i = fullpath.find_last_of("/");
-        if (i != std::string::npos)
-        {
-            dirname = fullpath.substr(0, i + 1);
-            basepath = dirname.c_str();
-        }
-    }
-
-    std::string warn;
-    std::string err;
-    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filepath, basepath, triangulate);
-
-    if (!err.empty())
-        fprintf(stderr, "\n%s\n", err.c_str());
-
-    if (!ret)
-        throw std::runtime_error("Erro ao carregar modelo.");
-
-    for (size_t shape = 0; shape < shapes.size(); ++shape)
-    {
-        if (shapes[shape].name.empty())
-        {
-            fprintf(stderr,
-                "*********************************************\n"
-                "Erro: Objeto sem nome dentro do arquivo '%s'.\n"
-                "Veja https://www.inf.ufrgs.br/~eslgastal/fcg-faq-etc.html#Modelos-3D-no-formato-OBJ .\n"
-                "*********************************************\n",
-                filepath);
-            throw std::runtime_error("Objeto sem nome.");
-        }
-        printf("- Objeto '%s'\n", shapes[shape].name.c_str());
-    }
-
-    printf("OK.\n");
-
-    int32_t material_index = 0;
-    for (const auto& mat : materials)
-    {
-        bool has_any_texture = false;
-        MaterialTexturesIds mat_textures_ids = { max_int32, max_int32, max_int32 };
-
-        if (!mat.diffuse_texname.empty())
-        {
-            std::string text_path = dirname + mat.diffuse_texname;
-
-            mat_textures_ids.diffuse_id = LoadTextureImage(text_path.c_str());
-            has_any_texture = true;
-        }
-
-        if (!mat.emissive_texname.empty())
-        {
-            std::string text_path = dirname + mat.emissive_texname;
-
-            mat_textures_ids.emissive_id = LoadTextureImage(text_path.c_str());
-            has_any_texture = true;
-        }
-
-        if (!mat.alpha_texname.empty())
-        {
-            std::string text_path = dirname + mat.alpha_texname;
-
-            mat_textures_ids.opacity_id = LoadTextureImage(text_path.c_str());
-            has_any_texture = true;
-        }
-
-        if (has_any_texture) textures_ids.emplace(material_index, mat_textures_ids);
-
-        material_index++;
-    }
-}
-
 void UpdateGameStartScreen(GLFWwindow* window, double delta_time)
 {
     static constexpr float text_scale = 4.0f;
@@ -2652,231 +2486,6 @@ void UpdateCarInputAndAnimation(double delta_time, std::shared_ptr<Car> car, std
     }
 
     car->root->rotation.y += yaw_offset;
-}
-
-struct Obb
-{
-    glm::vec3 center;
-    glm::vec3 half_extents;
-
-    std::array<glm::vec3, 3> axis;
-};
-
-Obb CreateObb(const ObjModel& model, const glm::mat4& transform)
-{
-    Obb result;
-
-    glm::vec3 local_center = (model.min_bounds + model.max_bounds) * 0.5f;
-
-    glm::vec3 local_extents = (model.max_bounds - model.min_bounds) * 0.5f;
-
-
-    glm::vec4 world_center = transform * glm::vec4(local_center, 1.0f);
-
-    result.center = glm::vec3(world_center);
-
-    result.half_extents = local_extents *
-        glm::vec3(
-            glm::length(glm::vec3(transform[0])),
-            glm::length(glm::vec3(transform[1])),
-            glm::length(glm::vec3(transform[2]))
-        );
-
-    result.axis[0] = glm::normalize(glm::vec3(transform[0]));
-    result.axis[1] = glm::normalize(glm::vec3(transform[1]));
-    result.axis[2] = glm::normalize(glm::vec3(transform[2]));
-
-    return result;
-}
-
-bool Intersects(const Obb& a, const Obb& b)
-{
-    constexpr float EPSILON = 1e-6f;
-
-    glm::mat3 R;
-    glm::mat3 AbsR;
-
-    // Rotation matrix from B's coordinate frame into A's frame
-    for (int i = 0; i < 3; ++i)
-    {
-        for (int j = 0; j < 3; ++j)
-        {
-            R[i][j] = glm::dot(a.axis[i], b.axis[j]);
-            AbsR[i][j] = fabs(R[i][j]) + EPSILON;
-        }
-    }
-
-    // Translation vector from A to B expressed in A's coordinate frame
-    glm::vec3 t = b.center - a.center;
-
-    t = glm::vec3(
-        glm::dot(t, a.axis[0]),
-        glm::dot(t, a.axis[1]),
-        glm::dot(t, a.axis[2])
-    );
-
-
-    float ra;
-    float rb;
-
-
-    // Test axes of A
-    for (int i = 0; i < 3; ++i)
-    {
-        ra = a.half_extents[i];
-
-        rb =
-            b.half_extents[0] * AbsR[i][0] +
-            b.half_extents[1] * AbsR[i][1] +
-            b.half_extents[2] * AbsR[i][2];
-
-        if (fabs(t[i]) > ra + rb)
-            return false;
-    }
-
-
-    // Test axes of B
-    for (int i = 0; i < 3; ++i)
-    {
-        ra =
-            a.half_extents[0] * AbsR[0][i] +
-            a.half_extents[1] * AbsR[1][i] +
-            a.half_extents[2] * AbsR[2][i];
-
-        rb = b.half_extents[i];
-
-        float distance =
-            fabs(
-                t[0] * R[0][i] +
-                t[1] * R[1][i] +
-                t[2] * R[2][i]
-            );
-
-        if (distance > ra + rb)
-            return false;
-    }
-
-
-    // Test cross products of A's axes and B's axes
-    // L = A0 x B0
-    ra =
-        a.half_extents[1] * AbsR[2][0] +
-        a.half_extents[2] * AbsR[1][0];
-
-    rb =
-        b.half_extents[1] * AbsR[0][2] +
-        b.half_extents[2] * AbsR[0][1];
-
-    if (fabs(t[2] * R[1][0] - t[1] * R[2][0]) > ra + rb)
-        return false;
-
-
-    // L = A0 x B1
-    ra =
-        a.half_extents[1] * AbsR[2][1] +
-        a.half_extents[2] * AbsR[1][1];
-
-    rb =
-        b.half_extents[0] * AbsR[0][2] +
-        b.half_extents[2] * AbsR[0][0];
-
-    if (fabs(t[2] * R[1][1] - t[1] * R[2][1]) > ra + rb)
-        return false;
-
-
-    // L = A0 x B2
-    ra =
-        a.half_extents[1] * AbsR[2][2] +
-        a.half_extents[2] * AbsR[1][2];
-
-    rb =
-        b.half_extents[0] * AbsR[0][1] +
-        b.half_extents[1] * AbsR[0][0];
-
-    if (fabs(t[2] * R[1][2] - t[1] * R[2][2]) > ra + rb)
-        return false;
-
-
-    // L = A1 x B0
-    ra =
-        a.half_extents[0] * AbsR[2][0] +
-        a.half_extents[2] * AbsR[0][0];
-
-    rb =
-        b.half_extents[1] * AbsR[1][2] +
-        b.half_extents[2] * AbsR[1][1];
-
-    if (fabs(t[0] * R[2][0] - t[2] * R[0][0]) > ra + rb)
-        return false;
-
-
-    // L = A1 x B1
-    ra =
-        a.half_extents[0] * AbsR[2][1] +
-        a.half_extents[2] * AbsR[0][1];
-
-    rb =
-        b.half_extents[0] * AbsR[1][2] +
-        b.half_extents[2] * AbsR[1][0];
-
-    if (fabs(t[0] * R[2][1] - t[2] * R[0][1]) > ra + rb)
-        return false;
-
-
-    // L = A1 x B2
-    ra =
-        a.half_extents[0] * AbsR[2][2] +
-        a.half_extents[2] * AbsR[0][2];
-
-    rb =
-        b.half_extents[0] * AbsR[1][1] +
-        b.half_extents[1] * AbsR[1][0];
-
-    if (fabs(t[0] * R[2][2] - t[2] * R[0][2]) > ra + rb)
-        return false;
-
-
-    // L = A2 x B0
-    ra =
-        a.half_extents[0] * AbsR[1][0] +
-        a.half_extents[1] * AbsR[0][0];
-
-    rb =
-        b.half_extents[1] * AbsR[2][2] +
-        b.half_extents[2] * AbsR[2][1];
-
-    if (fabs(t[1] * R[0][0] - t[0] * R[1][0]) > ra + rb)
-        return false;
-
-
-    // L = A2 x B1
-    ra =
-        a.half_extents[0] * AbsR[1][1] +
-        a.half_extents[1] * AbsR[0][1];
-
-    rb =
-        b.half_extents[0] * AbsR[2][2] +
-        b.half_extents[2] * AbsR[2][0];
-
-    if (fabs(t[1] * R[0][1] - t[0] * R[1][1]) > ra + rb)
-        return false;
-
-
-    // L = A2 x B2
-    ra =
-        a.half_extents[0] * AbsR[1][2] +
-        a.half_extents[1] * AbsR[0][2];
-
-    rb =
-        b.half_extents[0] * AbsR[2][1] +
-        b.half_extents[1] * AbsR[2][0];
-
-    if (fabs(t[1] * R[0][2] - t[0] * R[1][2]) > ra + rb)
-        return false;
-
-
-    // No separating axis found
-    return true;
 }
 
 void UpdateCarsPhysics(double delta_time, std::vector<std::shared_ptr<Car>> cars, std::shared_ptr<Track> track)

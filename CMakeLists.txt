@@ -16,6 +16,8 @@ set(SOURCES
   src/entity.cpp
   src/component.cpp
   src/curve_path_loader.cpp
+  src/collisions.cpp
+  src/obj_model.cpp
 )
 
 set(HEADERS
@@ -24,6 +26,8 @@ set(HEADERS
   include/component.h
   include/curve_path_loader.h
   include/matrix_operations.h
+  include/collisions.h
+  include/obj_model.h
 )
 
 set(SHADERS
@@ -38,7 +42,7 @@ source_group("Shaders" FILES ${SHADERS})
 
 cmake_minimum_required(VERSION 3.5.0)
 
-project(LAB_FCG VERSION 1.0.0)
+project(SlotcarGame VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD          20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
