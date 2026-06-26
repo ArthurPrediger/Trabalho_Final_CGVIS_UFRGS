@@ -8,7 +8,7 @@ https://moodle.ufrgs.br/mod/assign/view.php?id=6018620
 
 ## 1. A Aplicação Desenvolvida
 
-A aplicação desenvolvida é um jogo de corrida no estilo autorama para dois jogadores, onde os carros seguem um caminho pré-calculado sobre uma curva do tipo b-spline cúbica por partes. Mecanicamente o jogo se inspira nas funcionalidades de uma das seções do jogo Mario Party, onde os carros competem por completar voltas no menor tempo enquanto buscam se manter abaixo do limite máximo de velocidade da pista, que varia conforme o ângulo de curvatura em cada ponto da pista. Visualmente, o jogo busca um visual com modelos de carros e outros objetos que tendem mais ao realismo, como os do jogo Gran Turismo 5.
+A aplicação desenvolvida é um jogo de corrida no estilo autorama para dois jogadores, onde os carros seguem um caminho pré-calculado sobre uma curva do tipo b-spline cúbica por partes. Mecanicamente o jogo se inspira nas funcionalidades de uma das seções do jogo Mario Party, onde os jogadores competem por completar 4 voltas com seu carros antes dos adversários. Cada jogador precisa se manter abaixo do limite máximo de velocidade da pista, que varia conforme o ângulo de curvatura em cada ponto da pista, para não perder o controle do carro. Visualmente, o jogo apresenta modelos de carros e outros objetos que tendem mais ao realismo do que em Mario Party, inspirando-se em jogos como Gran Turismo 5.
 
 ## 2. Contribuição de cada membro
 
@@ -50,7 +50,7 @@ IAs generativas foram utilizadas no desenvolvimento de funcionalidades e aspecto
 
 ### Requerimento para todos os SOs
 
-Um compilador com suporte a versão 20 do C++.
+Um compilador C/C++ com suporte à versão C++20.
 
 ### Windows com MSVC
 A versão padrão de desenvolvimento do jogo foi feita em Windows utilizando o MSVC na sua versão presente na IDE Visual Studio 2022 para compilação da aplicação. Para compilar o jogo por esse método basta:
@@ -77,3 +77,5 @@ Veja mais instruções de uso do CMake no VSCode em:
 https://github.com/microsoft/vscode-cmake-tools/blob/main/docs/README.md
 
 ## 7. Link de Vídeo do Jogo
+
+https://www.youtube.com/watch?v=iVQ5eiajN3s
